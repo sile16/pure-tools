@@ -7,7 +7,7 @@ Collects config files and runs commands to help validate storage configuration a
 
 ## Usage:
 ``` 
-# git clone
+# git clone https://github.com/sile16/pure-tools.git
 # cd pure-tools/
 # ./rh_collect_storage_diag.sh
 ```
