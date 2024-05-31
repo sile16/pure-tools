@@ -4,6 +4,14 @@ Tools for Pure Storage
 # rh_collect_storage_diag.sh
 Collects config files and runs commands to help validate storage configuration and help diagnose certain environmental / external issues that maybe affecting performance or functionality.
 
+
+## Usage:
+``` 
+# git clone
+# cd pure-tools/
+# ./rh_collect_storage_diag.sh
+```
+
 # multpath_wwn_map.sh
 This runs the standard multipath -ll command but also maps each 'sd' device to the source HBA WWN and Target WWN and shown in the output.
 
