@@ -1,7 +1,7 @@
 # pure-tools
 Tools for Pure Storage
 
-# rh_collect_storage_diag.sh
+# rh_storage_collect.sh
 Collects config files and runs commands to help validate storage configuration and help diagnose certain environmental / external issues that maybe affecting performance or functionality.
 
 
@@ -9,7 +9,7 @@ Collects config files and runs commands to help validate storage configuration a
 ``` 
 # git clone https://github.com/sile16/pure-tools.git
 # cd pure-tools/
-# ./rh_collect_storage_diag.sh
+# ./rh_storage_collect.sh
 ```
 
 # multpath_wwn_map.sh
