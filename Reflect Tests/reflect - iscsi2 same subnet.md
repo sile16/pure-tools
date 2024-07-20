@@ -1,12 +1,14 @@
-# Test1 - Local subnet iSCSI
+# Test2 - Local subnet iSCSI
 
 ```mermaid
 flowchart TD
   B2 --> C[CT0]
-  B1[CT0.ETH4 192.168.202.111 - 24:a9:37:50:4e:a5] --> C[CT0]
-  A[client01 - 192.168.202.199 - 00:50:56:a8:5d:ad] <-- iSCSI --> B2[CT0.ETH5 192.168.202.113 24:a9:37:50:4e:a4]
+  B1[CT0.ETH4.202 192.168.202.111 - 24:a9:37:50:4e:a5] --> C[CT0]
+  A[client01 - 192.168.202.199 - 00:50:56:a8:5d:ad] <-- iSCSI --> B2[CT0.ETH5.202 192.168.202.113 24:a9:37:50:4e:a4]
 
 ```
+# Results
+This shows the return path is same as incoming traffic as desired.  Even though we have multiple IPs on the same subnet.
 
 Logs
 ```
