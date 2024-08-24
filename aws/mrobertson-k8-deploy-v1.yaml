@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploy 3 Identical Ubuntu EC2 Instances with containerd Installed
+
+Parameters:
+    InstanceCount:
+        Type: Number
+        Default: 3
+        Description: Number of EC2 Instances to launch
+
+    K8ClusterName:
+        Type: String
+        Default: "kcluster"
+        Description: The Kubernetes cluster name used in hostnames and tags.
+
+    AvailabilityZone:
+        Type: String
+        Default: "us-east-2a"
+        AllowedValues:
+        - "us-east-2a"
+        - "us-east-2b"
+        - "us-east-2c"
+        Description: The availability zone where the instances should be launched.
+
+
+Resources:
+    InstanceSecurityGroup:
+        Type: "AWS::EC2::SecurityGroup"
+        Properties:
+            GroupDescription: "Enable SSH access on port 22"
+            VpcId: !Ref VPC
+            SecurityGroupIngress:
+            - IpProtocol: "tcp"
+              FromPort: 22
+              ToPort: 22
+              CidrIp: "0.0.0.0/0" # Open to all IPs; consider restricting this in production
+            Tags:
+            - Key: "K8ClusterName"
+              Value: !Ref K8ClusterName
+
+    VPC:
+        Type: "AWS::EC2::VPC"
+        Properties:
+            CidrBlock: "10.0.0.0/16"
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+            Tags:
+            - Key: "K8ClusterName"
+              Value: !Ref K8ClusterName
+
+    InternetGateway:
+        Type: "AWS::EC2::InternetGateway"
+        Properties:
+            Tags:
+                - Key: "K8ClusterName"
+                  Value: !Ref K8ClusterName
+
+    AttachGateway:
+        Type: "AWS::EC2::VPCGatewayAttachment"
+        Properties:
+            VpcId: !Ref VPC
+            InternetGatewayId: !Ref InternetGateway
+
+    Subnet:
+        Type: "AWS::EC2::Subnet"
+        Properties:
+            VpcId: !Ref VPC
+            CidrBlock: "10.0.1.0/24"
+            MapPublicIpOnLaunch: true
+            AvailabilityZone: !Ref AvailabilityZone
+            Tags:
+            - Key: "K8ClusterName"
+              Value: !Ref K8ClusterName
+
+    RouteTable:
+        Type: "AWS::EC2::RouteTable"
+        Properties:
+            VpcId: !Ref VPC
+            Tags:
+            - Key: "K8ClusterName"
+              Value: !Ref K8ClusterName
+
+    Route:
+        Type: "AWS::EC2::Route"
+        Properties:
+            RouteTableId: !Ref RouteTable
+            DestinationCidrBlock: "0.0.0.0/0"
+            GatewayId: !Ref InternetGateway
+
+    SubnetRouteTableAssociation:
+        Type: "AWS::EC2::SubnetRouteTableAssociation"
+        Properties:
+            SubnetId: !Ref Subnet
+            RouteTableId: !Ref RouteTable
+
+    LaunchTemplate:
+        Type: "AWS::EC2::LaunchTemplate"
+        Properties:
+            LaunchTemplateData:
+                InstanceType: "t2.medium"
+                ImageId: "ami-003932de22c285676" # Ubuntu Server 22.04
+                KeyName: "mrobertson-pub-key"
+                SecurityGroupIds:
+                    - !GetAtt InstanceSecurityGroup.GroupId
+                UserData: !Base64 |
+                    !Sub | 
+                        #!/bin/bash
+                        # Update and install necessary packages
+                        cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf_a
+                        overaly
+                        br_netfilter
+                        EOF
+
+                        modprobe overaly
+                        modprobe br_netfilter
+
+
+
+                        # Set hostname dynamically using the K8ClusterName and instance metadata
+                        INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)
+                        NODE_NUMBER=$(echo ${INSTANCE_ID} | grep -oE '[0-9]+$')
+                        HOSTNAME="${K8ClusterName}-${NODE_NUMBER}"
+                        echo "hostnamectl set-hostname ${HOSTNAME}" > /var/log/hostname
+
+                        apt-get update -y
+                        apt-get upgrade -y
+                        apt-get install -y apt-transport-https ca-certificates curl software-properties-common gpg
+
+                        sudo install -m 0755 -d /etc/apt/keyrings
+                        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+                        sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+                        # Add the repository to Apt sources:
+                        echo \
+                            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+                            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+                            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                        sudo apt-get update
+                        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+                        cat <<EOF | sudo tee /etc/sysctl.d/99-kubernetes-cri_a.conf
+                        net.bridge.bridge-nf-call-iptables = 1
+                        net.ipv4.ip_forward = 1
+                        net.bridge.bridge-nf-call-ip6tables = 1
+                        EOF
+
+                        # Configure containerd and start it
+                        mkdir -p /etc/containerd
+                        containerd config default | tee /etc/containerd/config.toml
+                        systemctl restart containerd
+
+                        sudo sed -i 's/^SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+                        # Install kubeadm, kubelet, and kubectl
+                        swapoff -a
+                        # Remove the swap entry from /etc/fstab to make it permanent 
+                        sudo sed -i '/ swap /d' /etc/fstab
+
+                        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+                        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+                        sudo apt-get update
+                        sudo apt-get install -y kubelet kubeadm kubectl
+                        sudo apt-mark hold kubelet kubeadm kubectl
+                        sudo systemctl enable --now kubelet
+
+        
+
+
+
+            TagSpecifications:
+            - ResourceType: "launch-template"
+              Tags:
+                - Key: "K8ClusterName"
+                  Value: !Ref K8ClusterName
+
+    AutoScalingGroup:
+        Type: "AWS::AutoScaling::AutoScalingGroup"
+        Properties:
+            MinSize: !Ref InstanceCount
+            MaxSize: !Ref InstanceCount
+            DesiredCapacity: !Ref InstanceCount
+            VPCZoneIdentifier:
+            - !Ref Subnet
+            LaunchTemplate:
+                Version: "1"
+                LaunchTemplateId: !GetAtt LaunchTemplate.LaunchTemplateId
+            AvailabilityZones:
+            - !Ref AvailabilityZone
+            Tags:
+            - Key: "K8ClusterName"
+              Value: !Ref K8ClusterName
+              PropagateAtLaunch: true
+
+
+Outputs:
+    InstanceSecurityGroupId:
+        Description: "Security Group ID"
+        Value: !GetAtt InstanceSecurityGroup.GroupId
+
+    LaunchTemplateId:
+        Description: "The Launch Template ID"
+        Value: !GetAtt LaunchTemplate.LaunchTemplateId
+
