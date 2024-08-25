@@ -23,6 +23,16 @@ Parameters:
 
 
 Resources:
+    VPC:
+        Type: "AWS::EC2::VPC"
+        Properties:
+            CidrBlock: "10.0.0.0/16"
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+            Tags:
+            - Key: "K8ClusterName"
+              Value: !Ref K8ClusterName
+
     InstanceSecurityGroup:
         Type: "AWS::EC2::SecurityGroup"
         Properties:
@@ -33,16 +43,6 @@ Resources:
               FromPort: 22
               ToPort: 22
               CidrIp: "0.0.0.0/0" # Open to all IPs; consider restricting this in production
-            Tags:
-            - Key: "K8ClusterName"
-              Value: !Ref K8ClusterName
-
-    VPC:
-        Type: "AWS::EC2::VPC"
-        Properties:
-            CidrBlock: "10.0.0.0/16"
-            EnableDnsSupport: true
-            EnableDnsHostnames: true
             Tags:
             - Key: "K8ClusterName"
               Value: !Ref K8ClusterName
@@ -92,6 +92,28 @@ Resources:
             SubnetId: !Ref Subnet
             RouteTableId: !Ref RouteTable
 
+    NFSServer:
+        Type: AWS::EC2::Instance
+        Properties:
+            InstanceType: t2.micro
+            ImageId: "ami-003932de22c285676" # Ubuntu Server 22.04
+            KeyName: "mrobertson-pub-key"
+            SecurityGroupIds:
+                - !GetAtt InstanceSecurityGroup.GroupId
+            UserData:
+                Fn::Base64: !Sub |
+                    #!/bin/bash
+                    yum update -y
+                    yum install -y nfs-utils
+                    systemctl enable nfs-server
+                    systemctl start nfs-server
+                    mkdir /nfs
+                    echo "/nfs *(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
+                    exportfs -arv
+                    systemctl restart nfs-server
+
+
+
     LaunchTemplate:
         Type: "AWS::EC2::LaunchTemplate"
         Properties:
@@ -101,25 +123,32 @@ Resources:
                 KeyName: "mrobertson-pub-key"
                 SecurityGroupIds:
                     - !GetAtt InstanceSecurityGroup.GroupId
-                UserData: !Base64 |
-                    !Sub | 
+                UserData:
+                    Fn::Base64: !Sub |
                         #!/bin/bash
                         # Update and install necessary packages
                         cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf_a
-                        overaly
+                        overlay
                         br_netfilter
                         EOF
 
-                        modprobe overaly
+                        modprobe overlay
                         modprobe br_netfilter
 
+                        sudo apt-get update
+                        sudo apt-get install -y nfs-common
 
+                        # Mount NFS filesystem
+                        NFS_SERVER_IP="${!GetAtt NFSServer.PrivateIp}"
+                        mkdir -p /mnt/nfs
+                        echo '$NFS_SERVER:/nfs /mnt/nfs nfs _netdev 0 0' >> /etc/fstab
+                        
 
                         # Set hostname dynamically using the K8ClusterName and instance metadata
-                        INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)
-                        NODE_NUMBER=$(echo ${INSTANCE_ID} | grep -oE '[0-9]+$')
-                        HOSTNAME="${K8ClusterName}-${NODE_NUMBER}"
-                        echo "hostnamectl set-hostname ${HOSTNAME}" > /var/log/hostname
+                        #INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)
+                        #NODE_NUMBER=$(echo $INSTANCE_ID | grep -oE '[0-9]+$')
+                        #HOSTNAME="${K8ClusterName}-$NODE_NUMBER"
+                        #echo "hostnamectl set-hostname $HOSTNAME" > /var/log/hostname
 
                         apt-get update -y
                         apt-get upgrade -y
@@ -137,10 +166,10 @@ Resources:
                         sudo apt-get update
                         sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-                        cat <<EOF | sudo tee /etc/sysctl.d/99-kubernetes-cri_a.conf
+                        cat <<EOF | sudo tee /etc/sysctl.d/99-kubernetes-cri.conf
                         net.bridge.bridge-nf-call-iptables = 1
-                        net.ipv4.ip_forward = 1
                         net.bridge.bridge-nf-call-ip6tables = 1
+                        net.ipv4.ip_forward = 1
                         EOF
 
                         # Configure containerd and start it
@@ -148,7 +177,7 @@ Resources:
                         containerd config default | tee /etc/containerd/config.toml
                         systemctl restart containerd
 
-                        sudo sed -i 's/^SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+                        sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 
                         # Install kubeadm, kubelet, and kubectl
                         swapoff -a
@@ -162,10 +191,31 @@ Resources:
                         sudo apt-mark hold kubelet kubeadm kubectl
                         sudo systemctl enable --now kubelet
 
+                        mount -a
+                        # Write hostname to NFS
+                        echo $(hostname) > /mnt/nfs/$(hostname).node
+                        echo $(hostname) > /mnt/nfs/$(hostname).temp
+
+                        # Attempt to rename to master - only one node will succeed
+                        mv /mnt/nfs/$(hostname).temp /mnt/nfs/master && MASTER=1 || MASTER=0
+
+                        # Check if the current node is master
+                        if [[ $MASTER -eq 1 ]]; then
+                            # Initialize Kubernetes master
+                            kubeadm init --pod-network-cidr=10.0.2.0/24 > /mnt/nfs/kubeadm_init.log
+
+                            # Extract the join command
+                            cat /mnt/nfs/kubeadm_init.log | grep "kubeadm join" -A 2 > /mnt/nfs/join
+
+                        else
+                            # Non-master nodes wait until the join file is available
+                            while [ ! -f /mnt/nfs/join ]; do sleep 10; done
+
+                            # Join the cluster
+                            bash /mnt/nfs/join
+                        fi
+
         
-
-
-
             TagSpecifications:
             - ResourceType: "launch-template"
               Tags:
@@ -199,4 +249,8 @@ Outputs:
     LaunchTemplateId:
         Description: "The Launch Template ID"
         Value: !GetAtt LaunchTemplate.LaunchTemplateId
+
+    NFSServerIP:
+        Description: "IP Address of the NFS Server"
+        Value: !GetAtt NFSServer.PrivateIp
 
