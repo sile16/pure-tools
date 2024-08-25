@@ -43,6 +43,14 @@ Resources:
               FromPort: 22
               ToPort: 22
               CidrIp: "0.0.0.0/0" # Open to all IPs; consider restricting this in production
+            - IpProtocol: "-1"
+              FromPort: -1
+              ToPort: -1
+              CidrIp: "10.0.1.0/24"  # Local subnet
+            - IpProtocol: "-1"
+              FromPort: -1
+              ToPort: -1
+              CidrIp: "10.0.2.0/24"  # Local subnet
             Tags:
             - Key: "K8ClusterName"
               Value: !Ref K8ClusterName
@@ -94,28 +102,32 @@ Resources:
 
     NFSServer:
         Type: AWS::EC2::Instance
+        DependsOn: [InstanceSecurityGroup, Subnet]
         Properties:
             InstanceType: t2.micro
             ImageId: "ami-003932de22c285676" # Ubuntu Server 22.04
             KeyName: "mrobertson-pub-key"
             SecurityGroupIds:
                 - !GetAtt InstanceSecurityGroup.GroupId
+            SubnetId: !Ref Subnet 
             UserData:
                 Fn::Base64: !Sub |
                     #!/bin/bash
-                    yum update -y
-                    yum install -y nfs-utils
-                    systemctl enable nfs-server
-                    systemctl start nfs-server
+                    apt-get update -y
+                    apt-get install -y nfs-server 
                     mkdir /nfs
+                    chmod 777 /nfs
                     echo "/nfs *(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
                     exportfs -arv
+                    systemctl enable nfs-server
+                    systemctl start nfs-server
                     systemctl restart nfs-server
 
 
 
     LaunchTemplate:
         Type: "AWS::EC2::LaunchTemplate"
+        DependsOn: [NFSServer]
         Properties:
             LaunchTemplateData:
                 InstanceType: "t2.medium"
@@ -127,7 +139,7 @@ Resources:
                     Fn::Base64: !Sub |
                         #!/bin/bash
                         # Update and install necessary packages
-                        cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf_a
+                        cat <<EOF | sudo tee /etc/modules-load.d/containerd.conf
                         overlay
                         br_netfilter
                         EOF
@@ -136,12 +148,14 @@ Resources:
                         modprobe br_netfilter
 
                         sudo apt-get update
-                        sudo apt-get install -y nfs-common
+                        sudo apt-get install -y nfs-common 
 
                         # Mount NFS filesystem
-                        NFS_SERVER_IP="${!GetAtt NFSServer.PrivateIp}"
+                        NFS_SERVER_IP=
+                        echo "${NFSServer.PrivateIp}" > /var/log/nfs_server_ip
+                        
                         mkdir -p /mnt/nfs
-                        echo '$NFS_SERVER:/nfs /mnt/nfs nfs _netdev 0 0' >> /etc/fstab
+                        echo "${NFSServer.PrivateIp}:/nfs /mnt/nfs nfs _netdev 0 0" >> /etc/fstab
                         
 
                         # Set hostname dynamically using the K8ClusterName and instance metadata
@@ -202,10 +216,10 @@ Resources:
                         # Check if the current node is master
                         if [[ $MASTER -eq 1 ]]; then
                             # Initialize Kubernetes master
-                            kubeadm init --pod-network-cidr=10.0.2.0/24 > /mnt/nfs/kubeadm_init.log
+                            kubeadm init --pod-network-cidr=10.0.2.0/24 | tee /var/log/kubeadm_init.log
 
                             # Extract the join command
-                            cat /mnt/nfs/kubeadm_init.log | grep "kubeadm join" -A 2 > /mnt/nfs/join
+                            cat var/log/kubeadm_init.log | grep "kubeadm join" -A 2 > /mnt/nfs/join
 
                         else
                             # Non-master nodes wait until the join file is available
@@ -221,9 +235,12 @@ Resources:
               Tags:
                 - Key: "K8ClusterName"
                   Value: !Ref K8ClusterName
+                - Key: "NFSServerIP"
+                  Value: !GetAtt NFSServer.PrivateIp
 
     AutoScalingGroup:
         Type: "AWS::AutoScaling::AutoScalingGroup"
+        DependsOn: [LaunchTemplate]
         Properties:
             MinSize: !Ref InstanceCount
             MaxSize: !Ref InstanceCount
