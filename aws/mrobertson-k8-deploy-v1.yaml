@@ -21,6 +21,15 @@ Parameters:
         - "us-east-2c"
         Description: The availability zone where the instances should be launched.
 
+    KubernetesVersion:
+        Type: String
+        Default: "v1.31"
+        AllowedValues:
+        - "v1.31"
+        - "v1.30"
+        - "v1.29"
+        Description: Kubernetes Version
+
 
 Resources:
     VPC:
@@ -36,12 +45,24 @@ Resources:
     InstanceSecurityGroup:
         Type: "AWS::EC2::SecurityGroup"
         Properties:
-            GroupDescription: "Enable SSH access on port 22"
+            GroupDescription: "Enable SSH access and Web"
             VpcId: !Ref VPC
             SecurityGroupIngress:
             - IpProtocol: "tcp"
               FromPort: 22
               ToPort: 22
+              CidrIp: "0.0.0.0/0" # Open to all IPs; consider restricting this in production
+            - IpProtocol: "tcp"
+              FromPort: 80
+              ToPort: 80
+              CidrIp: "0.0.0.0/0" # Open to all IPs; consider restricting this in production
+            - IpProtocol: "tcp"
+              FromPort: 8080
+              ToPort: 8080
+              CidrIp: "0.0.0.0/0" # Open to all IPs; consider restricting this in production
+            - IpProtocol: "tcp"
+              FromPort: 443
+              ToPort: 443
               CidrIp: "0.0.0.0/0" # Open to all IPs; consider restricting this in production
             - IpProtocol: "-1"
               FromPort: -1
@@ -148,86 +169,85 @@ Resources:
                         modprobe br_netfilter
 
                         sudo apt-get update
-                        sudo apt-get install -y nfs-common 
-
-                        # Mount NFS filesystem
-                        NFS_SERVER_IP=
-                        echo "${NFSServer.PrivateIp}" > /var/log/nfs_server_ip
-                        
-                        mkdir -p /mnt/nfs
-                        echo "${NFSServer.PrivateIp}:/nfs /mnt/nfs nfs _netdev 0 0" >> /etc/fstab
-                        
-
-                        # Set hostname dynamically using the K8ClusterName and instance metadata
-                        #INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)
-                        #NODE_NUMBER=$(echo $INSTANCE_ID | grep -oE '[0-9]+$')
-                        #HOSTNAME="${K8ClusterName}-$NODE_NUMBER"
-                        #echo "hostnamectl set-hostname $HOSTNAME" > /var/log/hostname
-
-                        apt-get update -y
                         apt-get upgrade -y
-                        apt-get install -y apt-transport-https ca-certificates curl software-properties-common gpg
+                        sudo apt-get install -y nfs-common apt-transport-https ca-certificates curl software-properties-common gpg net-tools containerd jq
 
-                        sudo install -m 0755 -d /etc/apt/keyrings
-                        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-                        sudo chmod a+r /etc/apt/keyrings/docker.asc
+                        #sudo install -m 0755 -d /etc/apt/keyrings
+                        #sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+                        #sudo chmod a+r /etc/apt/keyrings/docker.asc
 
                         # Add the repository to Apt sources:
-                        echo \
-                            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-                            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-                            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-                        sudo apt-get update
-                        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                        #echo \
+                        #    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+                        #    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+                        #    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                        #sudo apt-get update
+                        #sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
                         cat <<EOF | sudo tee /etc/sysctl.d/99-kubernetes-cri.conf
                         net.bridge.bridge-nf-call-iptables = 1
                         net.bridge.bridge-nf-call-ip6tables = 1
                         net.ipv4.ip_forward = 1
                         EOF
+                        sysctl --system # apply settings
 
                         # Configure containerd and start it
                         mkdir -p /etc/containerd
                         containerd config default | tee /etc/containerd/config.toml
-                        systemctl restart containerd
-
                         sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+                        systemctl restart containerd
 
                         # Install kubeadm, kubelet, and kubectl
                         swapoff -a
                         # Remove the swap entry from /etc/fstab to make it permanent 
                         sudo sed -i '/ swap /d' /etc/fstab
 
-                        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-                        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+                        curl -fsSL https://pkgs.k8s.io/core:/stable:/${KubernetesVersion}/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+                        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KubernetesVersion}/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
                         sudo apt-get update
                         sudo apt-get install -y kubelet kubeadm kubectl
                         sudo apt-mark hold kubelet kubeadm kubectl
                         sudo systemctl enable --now kubelet
 
+                        # Mount NFS filesystem
+                        echo "${NFSServer.PrivateIp}" > /var/log/nfs_server_ip   
+                        mkdir -p /mnt/nfs
+                        echo "${NFSServer.PrivateIp}:/nfs /mnt/nfs nfs _netdev 0 0" >> /etc/fstab
                         mount -a
                         # Write hostname to NFS
                         echo $(hostname) > /mnt/nfs/$(hostname).node
                         echo $(hostname) > /mnt/nfs/$(hostname).temp
 
                         # Attempt to rename to master - only one node will succeed
-                        mv /mnt/nfs/$(hostname).temp /mnt/nfs/master && MASTER=1 || MASTER=0
+                        mv -n /mnt/nfs/$(hostname).temp /mnt/nfs/master
+
+                        MASTER=$(cat /mnt/nfs/master)
 
                         # Check if the current node is master
-                        if [[ $MASTER -eq 1 ]]; then
+                        if [[ $MASTER -eq $(hostname) ]]; then
                             # Initialize Kubernetes master
+                            echo "I am master" | tee /var/log/master
                             kubeadm init --pod-network-cidr=10.0.2.0/24 | tee /var/log/kubeadm_init.log
 
                             # Extract the join command
                             cat var/log/kubeadm_init.log | grep "kubeadm join" -A 2 > /mnt/nfs/join
 
                         else
+                            echo "I am not master" | tee /var/log/master
                             # Non-master nodes wait until the join file is available
                             while [ ! -f /mnt/nfs/join ]; do sleep 10; done
 
                             # Join the cluster
                             bash /mnt/nfs/join
                         fi
+
+                        chmod 666 /etc/kubernetes/admin.conf
+                        sudo -u ubuntu mkdir -p /home/ubuntu/.kube
+                        sudo -u ubuntu cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+
+
+
+
 
         
             TagSpecifications:
