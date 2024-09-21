@@ -71,7 +71,7 @@ Resources:
             - IpProtocol: "-1"
               FromPort: -1
               ToPort: -1
-              CidrIp: "10.0.2.0/24"  # Local subnet
+              CidrIp: "10.244.0.0/16"  # Local subnet
             Tags:
             - Key: "K8ClusterName"
               Value: !Ref K8ClusterName
@@ -170,7 +170,7 @@ Resources:
 
                         sudo apt-get update
                         apt-get upgrade -y
-                        sudo apt-get install -y nfs-common apt-transport-https ca-certificates curl software-properties-common gpg net-tools containerd jq
+                        sudo apt-get install -y nfs-common apt-transport-https ca-certificates curl software-properties-common gpg net-tools containerd jq git
 
                         #sudo install -m 0755 -d /etc/apt/keyrings
                         #sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
@@ -227,10 +227,18 @@ Resources:
                         if [[ $MASTER -eq $(hostname) ]]; then
                             # Initialize Kubernetes master
                             echo "I am master" | tee /var/log/master
-                            kubeadm init --pod-network-cidr=10.0.2.0/24 | tee /var/log/kubeadm_init.log
+                            wget https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+                            kubeadm init --pod-network-cidr=10.244.0.0/16 | tee /var/log/kubeadm_init.log
 
                             # Extract the join command
                             cat var/log/kubeadm_init.log | grep "kubeadm join" -A 2 > /mnt/nfs/join
+
+                            export KUBECONFIG=/etc/kubernetes/admin.conf
+
+                            #install networking
+                            kubectl apply -f kube-flannel.yml
+
 
                         else
                             echo "I am not master" | tee /var/log/master
@@ -241,13 +249,17 @@ Resources:
                             bash /mnt/nfs/join
                         fi
 
+                        
                         chmod 666 /etc/kubernetes/admin.conf
                         sudo -u ubuntu mkdir -p /home/ubuntu/.kube
                         sudo -u ubuntu cp -i /etc/kubernetes/admin.conf /home/ubuntu/.kube/config
+                        cd /home/ubuntu/
+                        sudo -u ubuntu git clone https://github.com/sile16/pure-tools.git
 
-
-
-
+                        sudo -u ubuntu echo "source <(kubectl completion bash)" >> /home/ubuntu/.bashrc
+                        sudo -u ubuntu echo "alias k=kubectl" >> /home/ubuntu/.bashrc
+                        sudo -u ubuntu echo "complete -o default -F __start_kubectl k" >> /home/ubuntu/.bashrc
+                        
 
         
             TagSpecifications:
