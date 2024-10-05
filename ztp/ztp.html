@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pure Storage ZTP Configuration Tool</title>
+    <style>
+        /* Styles */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            color: #2D2926;
+        }
+        h1 {
+            color: #F26D00;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .field-group {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        .field-group label {
+            width: 200px;
+            margin-right: 10px;
+        }
+        .field-group input[type="text"],
+        .field-group input[type="number"],
+        .field-group select {
+            padding: 8px;
+            width: 300px;
+            max-width: 100%;
+            border: 1px solid #ccc;
+        }
+        .field-group input[type="text"].valid,
+        .field-group select.valid {
+            border-color: green;
+        }
+        .field-group input[type="text"].invalid,
+        .field-group select.invalid {
+            border-color: red;
+        }
+        .command-box {
+            margin-left: 20px;
+        }
+        .command-box label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .command-box pre {
+            background-color: #f4f4f4;
+            padding: 10px;
+            width: 400px;
+            overflow-x: auto;
+        }
+        .copy-btn {
+            margin-top: 5px;
+            padding: 5px 10px;
+            background-color: #2D2926;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+        .small-input {
+            width: 60px;
+        }
+        .optional {
+            font-style: italic;
+            color: #888;
+        }
+        .error {
+            color: red;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        .hidden {
+            display: none;
+        }
+        #eula-link {
+            color: #F26D00;
+            text-decoration: none;
+        }
+        #eula-link:visited {
+            color: #F26D00;
+        }
+        .loading {
+            font-style: italic;
+            color: #888;
+        }
+        .ip-prefix {
+            color: #888;
+            margin-right: 5px;
+            user-select: none;
+        }
+        .ip-input {
+            width: 80px;
+            border: none;
+            outline: none;
+        }
+        .ip-input-group {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid #ccc;
+            padding: 5px;
+        }
+        .ip-input-group.valid {
+            border-color: green;
+        }
+        .ip-input-group.invalid {
+            border-color: red;
+        }
+    </style>
+    <!-- Include external libraries -->
+    <!-- Include ipaddr.js library for IP validation and CIDR calculations -->
+    <script src="https://cdn.jsdelivr.net/npm/ipaddr.js@2.0.0/ipaddr.min.js"></script>
+    <!-- Validator.js for validation of hostnames and emails -->
+    <script src="https://cdn.jsdelivr.net/npm/validator@13.7.0/validator.min.js"></script>
+</head>
+<body>
+    <h1>Pure Storage ZTP Configuration Tool</h1>
+
+    <!-- 1. Subnet Scanning Section -->
+    <div class="section" id="subnet-section">
+        <h2>1. Subnet Scanning</h2>
+        <div class="field-group">
+            <label for="subnet-input">Enter Subnet to Scan (e.g., 192.168.1.0/24):</label>
+            <input type="text" id="subnet-input" placeholder="Subnet CIDR">
+            <span class="error hidden" id="subnet-error"></span>
+            <span class="valid-range" id="valid-range"></span>
+        </div>
+        <div class="command-box">
+            <label>Scan Command:</label>
+            <pre id="scan-command"></pre>
+            <button class="copy-btn" id="copy-scan-cmd">Copy</button>
+        </div>
+    </div>
+
+    <!-- 2. Array IP Address Section -->
+    <div class="section" id="array-ip-section">
+        <h2>2. Array IP Address</h2>
+        <div class="field-group">
+            <label for="array-ip">Enter CT1 IP Address:</label>
+            <input type="text" id="array-ip" placeholder="CT1 IP Address">
+            <span class="error hidden" id="array-ip-error"></span>
+        </div>
+        <div class="command-box">
+            <label>Fetch Array Details Command:</label>
+            <pre id="fetch-command"></pre>
+            <button class="copy-btn" id="copy-fetch-cmd">Copy</button>
+        </div>
+        <button id="fetch-array-details">Fetch Array Details</button>
+        <span class="loading hidden" id="fetch-loading">Fetching...</span>
+        <div class="field-group">
+            <label>Array Details:</label>
+            <pre id="array-details"></pre>
+        </div>
+        <span class="error hidden" id="array-fetch-error"></span>
+        <div class="field-group">
+            <label>Or Upload Array Details JSON File:</label>
+            <input type="file" id="array-details-file" accept=".json">
+            <span class="error hidden" id="array-file-error"></span>
+        </div>
+    </div>
+
+    <!-- 3. Configuration Section -->
+    <div class="section" id="config-section">
+        <h2>3. Configuration</h2>
+        <form id="config-form">
+            <div class="field-group">
+                <label for="array-name">Array Name:</label>
+                <input type="text" id="array-name" required>
+                <span class="error hidden" id="array-name-error"></span>
+            </div>
+            <div class="field-group">
+                <label>Management Interface:</label>
+                <select id="mgmt-interface" required>
+                    <option value="ct0.eth4">ct0.eth4 / ct1.eth4</option>
+                    <option value="ct0.eth0">ct0.eth0 / ct1.eth0</option>
+                </select> eth4 for R4 hardware, eth0 for all others
+            </div>
+            <div class="field-group">
+                <label for="subnet-cidr">Subnet CIDR:</label>
+                <input type="text" id="subnet-cidr" placeholder="e.g., 192.168.1.0/24" required>
+                <span class="error hidden" id="subnet-cidr-error"></span>
+                <span class="valid-range" id="valid-range-config"></span>
+            </div>
+            <div class="field-group">
+                <label for="gateway-ip">Gateway:</label>
+                <div class="ip-input-group" id="gateway-group">
+                    <span class="ip-prefix" id="gateway-prefix"></span>
+                    <input type="text" id="gateway-ip" class="ip-input" required>
+                </div>
+                <span class="error hidden" id="gateway-error"></span>
+            </div>
+            <div class="field-group">
+                <label for="vir0-ip">Virtual IP:</label>
+                <div class="ip-input-group" id="vir0-group">
+                    <span class="ip-prefix" id="vir0-prefix"></span>
+                    <input type="text" id="vir0-ip" class="ip-input" required>
+                </div>
+                <span class="error hidden" id="vir0-ip-error"></span>
+            </div>
+            <div class="field-group">
+                <label for="ct0-ip">CT0 IP:</label>
+                <div class="ip-input-group" id="ct0-group">
+                    <span class="ip-prefix" id="ct0-prefix"></span>
+                    <input type="text" id="ct0-ip" class="ip-input" required>
+                </div>
+                <span class="error hidden" id="ct0-ip-error"></span>
+            </div>
+            <div class="field-group">
+                <label for="ct1-ip">CT1 IP:</label>
+                <div class="ip-input-group" id="ct1-group">
+                    <span class="ip-prefix" id="ct1-prefix"></span>
+                    <input type="text" id="ct1-ip" class="ip-input" required>
+                </div>
+                <span class="error hidden" id="ct1-ip-error"></span>
+            </div>
+            <span class="error hidden" id="ip-error"></span>
+            <div class="field-group">
+                <label for="timezone">Timezone:</label>
+                <select id="timezone" required></select>
+            </div>
+            <div class="field-group">
+                <label for="ntp-servers">NTP Servers (comma-separated):</label>
+                <input type="text" id="ntp-servers" required>
+                <span class="error hidden" id="ntp-error"></span>
+            </div>
+            <div class="field-group">
+                <label for="alert-emails">Alert Emails (comma-separated):</label>
+                <input type="text" id="alert-emails" required>
+                <span class="error hidden" id="alert-emails-error"></span>
+            </div>
+            <div class="field-group">
+                <label for="dns-domain">DNS Domain: <span class="optional">(Optional)</span></label>
+                <input type="text" id="dns-domain">
+            </div>
+            <div class="field-group">
+                <label for="dns-nameservers">DNS Nameservers (comma-separated):</label>
+                <input type="text" id="dns-nameservers" required>
+                <span class="error hidden" id="dns-nameservers-error"></span>
+            </div>
+            <div class="field-group">
+                <label for="smtp-relay">SMTP Relay Host: <span class="optional">(Optional)</span></label>
+                <input type="text" id="smtp-relay">
+                <span class="error hidden" id="smtp-relay-error"></span>
+            </div>
+            <div class="field-group">
+                <label for="sender-domain">SMTP Sender Domain:</label>
+                <input type="text" id="sender-domain" required>
+                <span class="error hidden" id="sender-domain-error"></span>
+            </div>
+            <div class="field-group">
+                <label>EULA Acceptance:</label>
+                <a href="https://www.purestorage.com/legal/pure-end-user-agreement.html" target="_blank" id="eula-link">Read EULA</a><br>
+                <input type="checkbox" id="eula-checkbox" disabled> I accept the EULA
+            </div>
+            <div class="field-group">
+                <label>Accepted By:</label>
+                <input type="text" id="organization" placeholder="Organization" required><br>
+                <input type="text" id="full-name" placeholder="Full Name" required><br>
+                <input type="text" id="job-title" placeholder="Job Title" required>
+            </div>
+            <button type="submit" id="generate-config">Generate Configuration</button>
+        </form>
+        <div class="field-group hidden" id="config-output-group">
+            <label>Configuration JSON:</label>
+            <pre id="config-output"></pre>
+            <button id="download-config">Download Config.json</button>
+        </div>
+    </div>
+
+    <!-- 4. Apply Configuration Section -->
+    <div class="section" id="apply-config-section">
+        <h2>4. Apply Configuration</h2>
+        <p>Run the following command to apply the configuration:</p>
+        <div class="command-box">
+            <pre id="apply-command"></pre>
+            <button class="copy-btn" id="copy-apply-cmd">Copy</button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script>
+        // Declare global variables
+        let address;
+        let currentPrefix = '';
+        let netmask = '';
+        let ipSeparator = '.';
+        let totalSegments = 4; // For IPv4 (use 8 for IPv6)
+        let expectedSuffixLength = 0;
+    
+        // Get references to DOM elements
+        const timezoneSelect = document.getElementById('timezone');
+        const subnetInput = document.getElementById('subnet-input');
+        const subnetError = document.getElementById('subnet-error');
+        const scanCommand = document.getElementById('scan-command');
+        const copyScanCmd = document.getElementById('copy-scan-cmd');
+        const validRangeSpan = document.getElementById('valid-range');
+        const arrayIPInput = document.getElementById('array-ip');
+        const arrayIPError = document.getElementById('array-ip-error');
+        const fetchCommand = document.getElementById('fetch-command');
+        const copyFetchCmd = document.getElementById('copy-fetch-cmd');
+        const fetchArrayDetailsBtn = document.getElementById('fetch-array-details');
+        const fetchLoading = document.getElementById('fetch-loading');
+        const arrayDetails = document.getElementById('array-details');
+        const arrayFetchError = document.getElementById('array-fetch-error');
+        const arrayDetailsFileInput = document.getElementById('array-details-file');
+        const arrayFileError = document.getElementById('array-file-error');
+        const subnetCIDRInput = document.getElementById('subnet-cidr');
+        const gatewayPrefixSpan = document.getElementById('gateway-prefix');
+        const vir0PrefixSpan = document.getElementById('vir0-prefix');
+        const ct0PrefixSpan = document.getElementById('ct0-prefix');
+        const ct1PrefixSpan = document.getElementById('ct1-prefix');
+        const gatewayIPInput = document.getElementById('gateway-ip');
+        const vir0IPInput = document.getElementById('vir0-ip');
+        const ct0IPInput = document.getElementById('ct0-ip');
+        const ct1IPInput = document.getElementById('ct1-ip');
+        const gatewayGroup = document.getElementById('gateway-group');
+        const vir0Group = document.getElementById('vir0-group');
+        const ct0Group = document.getElementById('ct0-group');
+        const ct1Group = document.getElementById('ct1-group');
+        const gatewayError = document.getElementById('gateway-error');
+        const vir0IPError = document.getElementById('vir0-ip-error');
+        const ct0IPError = document.getElementById('ct0-ip-error');
+        const ct1IPError = document.getElementById('ct1-ip-error');
+        const ipError = document.getElementById('ip-error');
+        const arrayNameInput = document.getElementById('array-name');
+        const arrayNameError = document.getElementById('array-name-error');
+        const ntpServersInput = document.getElementById('ntp-servers');
+        const ntpError = document.getElementById('ntp-error');
+        const alertEmailsInput = document.getElementById('alert-emails');
+        const alertEmailsError = document.getElementById('alert-emails-error');
+        const dnsNameserversInput = document.getElementById('dns-nameservers');
+        const dnsNameserversError = document.getElementById('dns-nameservers-error');
+        const smtpRelayInput = document.getElementById('smtp-relay');
+        const smtpRelayError = document.getElementById('smtp-relay-error');
+        const senderDomainInput = document.getElementById('sender-domain');
+        const senderDomainError = document.getElementById('sender-domain-error');
+        const eulaLink = document.getElementById('eula-link');
+        const eulaCheckbox = document.getElementById('eula-checkbox');
+        const organizationInput = document.getElementById('organization');
+        const fullNameInput = document.getElementById('full-name');
+        const jobTitleInput = document.getElementById('job-title');
+        const mgmtInterfaceSelect = document.getElementById('mgmt-interface');
+        const subnetCIDRError = document.getElementById('subnet-cidr-error');
+        const configForm = document.getElementById('config-form');
+        const configOutputGroup = document.getElementById('config-output-group');
+        const configOutput = document.getElementById('config-output');
+        const downloadConfigBtn = document.getElementById('download-config');
+        const applyCommand = document.getElementById('apply-command');
+        const copyApplyCmdBtn = document.getElementById('copy-apply-cmd');
+        const dnsDomainInput = document.getElementById('dns-domain');
+        const validRangeSpanConfig = document.getElementById('valid-range-config');
+    
+        // Include full timezone list
+        const timezones = [
+            /* Full list of timezones */
+            "Africa/Abidjan",
+            "Africa/Accra",
+            // ... (rest of the timezones)
+            "UTC"
+        ];
+    
+        timezones.forEach(tz => {
+            const option = document.createElement('option');
+            option.value = tz;
+            option.textContent = tz;
+            timezoneSelect.appendChild(option);
+        });
+    
+        // EULA acceptance handling
+        eulaLink.addEventListener('click', () => {
+            eulaCheckbox.disabled = false;
+        });
+    
+        // Subnet scanning command generation
+        subnetInput.addEventListener('input', () => {
+            const subnetValue = subnetInput.value.trim();
+            if (ipaddr.isValid(subnetValue) || isValidCIDR(subnetValue)) {
+                subnetError.classList.add('hidden');
+                subnetInput.classList.remove('invalid');
+                subnetInput.classList.add('valid');
+                const nmapCmd = `nmap -p 8081 --open ${subnetValue}`;
+                scanCommand.textContent = nmapCmd;
+    
+                // Display valid IP range (Not available directly with ipaddr.js)
+                validRangeSpan.textContent = '';
+                validRangeSpan.classList.add('hidden');
+            } else {
+                subnetError.textContent = 'Please enter a valid subnet in CIDR notation.';
+                subnetError.classList.remove('hidden');
+                subnetInput.classList.remove('valid');
+                subnetInput.classList.add('invalid');
+                scanCommand.textContent = '';
+                validRangeSpan.textContent = '';
+                validRangeSpan.classList.add('hidden');
+            }
+        });
+    
+        copyScanCmd.addEventListener('click', () => {
+            navigator.clipboard.writeText(scanCommand.textContent);
+            alert('Command copied to clipboard!');
+        });
+    
+        // Fetch array details command generation
+        arrayIPInput.addEventListener('input', () => {
+            const arrayIP = arrayIPInput.value.trim();
+            if (ipaddr.isValid(arrayIP)) {
+                arrayIPError.classList.add('hidden');
+                arrayIPInput.classList.remove('invalid');
+                arrayIPInput.classList.add('valid');
+                const cmd = `curl http://${arrayIP}:8081 -o array_details.json`;
+                fetchCommand.textContent = cmd;
+            } else {
+                arrayIPError.textContent = 'Please enter a valid IP address.';
+                arrayIPError.classList.remove('hidden');
+                arrayIPInput.classList.remove('valid');
+                arrayIPInput.classList.add('invalid');
+                fetchCommand.textContent = '';
+            }
+        });
+    
+        copyFetchCmd.addEventListener('click', () => {
+            navigator.clipboard.writeText(fetchCommand.textContent);
+            alert('Command copied to clipboard!');
+        });
+    
+        // Fetch array details
+        fetchArrayDetailsBtn.addEventListener('click', () => {
+            const arrayIP = arrayIPInput.value.trim();
+            if (!ipaddr.isValid(arrayIP)) {
+                arrayIPError.textContent = 'Please enter a valid IP address.';
+                arrayIPError.classList.remove('hidden');
+                arrayIPInput.classList.add('invalid');
+                return;
+            } else {
+                arrayIPError.classList.add('hidden');
+                arrayIPInput.classList.remove('invalid');
+            }
+    
+            fetchLoading.classList.remove('hidden');
+            arrayDetails.textContent = '';
+            arrayFetchError.classList.add('hidden');
+    
+            fetch(`http://${arrayIP}:8081`)
+                .then(response => {
+                    fetchLoading.classList.add('hidden');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    arrayDetails.textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(error => {
+                    fetchLoading.classList.add('hidden');
+                    arrayFetchError.textContent = `Error fetching array details: ${error.message}`;
+                    arrayFetchError.classList.remove('hidden');
+                });
+        });
+    
+        // Handle array details file upload
+        arrayDetailsFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && file.type === 'application/json') {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        arrayFileError.classList.add('hidden');
+                        arrayDetails.textContent = JSON.stringify(data, null, 2);
+                    } catch (err) {
+                        arrayFileError.textContent = 'Invalid JSON file.';
+                        arrayFileError.classList.remove('hidden');
+                    }
+                };
+                reader.readAsText(file);
+            } else {
+                arrayFileError.textContent = 'Please upload a valid JSON file.';
+                arrayFileError.classList.remove('hidden');
+            }
+        });
+    
+        // Add event listeners to subnet CIDR and IP inputs
+        [subnetCIDRInput, gatewayIPInput, vir0IPInput, ct0IPInput, ct1IPInput].forEach(input => {
+            input.addEventListener('input', validateNetworkSettings);
+        });
+    
+        // Main validation function
+        function validateNetworkSettings() {
+            // Assume inputs are invalid by default
+            resetIPValidation();
+    
+            // Validate Subnet CIDR
+            const subnetValue = subnetCIDRInput.value.trim();
+            if (!isValidCIDR(subnetValue)) {
+                subnetCIDRError.textContent = 'Invalid subnet CIDR.';
+                subnetCIDRError.classList.remove('hidden');
+                subnetCIDRInput.classList.remove('valid');
+                subnetCIDRInput.classList.add('invalid');
+                currentPrefix = '';
+                clearIPPrefixes();
+                return;
+            }
+    
+            // Subnet CIDR is valid
+            subnetCIDRError.classList.add('hidden');
+            subnetCIDRInput.classList.remove('invalid');
+            subnetCIDRInput.classList.add('valid');
+    
+            // Parse CIDR and update prefixes
+            address = ipaddr.parseCIDR(subnetValue);
+            updateIPPrefixes();
+    
+            // Validate each IP address
+            const ipInputs = [
+                { input: gatewayIPInput, group: gatewayGroup, errorSpan: gatewayError, prefixSpan: gatewayPrefixSpan },
+                { input: vir0IPInput, group: vir0Group, errorSpan: vir0IPError, prefixSpan: vir0PrefixSpan },
+                { input: ct0IPInput, group: ct0Group, errorSpan: ct0IPError, prefixSpan: ct0PrefixSpan },
+                { input: ct1IPInput, group: ct1Group, errorSpan: ct1IPError, prefixSpan: ct1PrefixSpan }
+            ];
+    
+            let allIPsValid = true;
+            const ipAddresses = [];
+    
+            ipInputs.forEach(({ input, group, errorSpan, prefixSpan }) => {
+                const ipValid = validateIPInput(input, errorSpan);
+                if (ipValid) {
+                    group.classList.remove('invalid');
+                    group.classList.add('valid');
+                    ipAddresses.push(constructFullIP(input.value.trim()));
+                } else {
+                    group.classList.remove('valid');
+                    group.classList.add('invalid');
+                    allIPsValid = false;
+                }
+            });
+    
+            // Check for unique IP addresses
+            if (allIPsValid) {
+                const uniqueIPs = new Set(ipAddresses);
+                if (uniqueIPs.size !== ipAddresses.length) {
+                    ipError.textContent = 'All IP addresses must be unique.';
+                    ipError.classList.remove('hidden');
+                    ipInputs.forEach(({ group }) => {
+                        group.classList.remove('valid');
+                        group.classList.add('invalid');
+                    });
+                } else {
+                    ipError.classList.add('hidden');
+                }
+            }
+        }
+
+        function prefixLengthToNetmask(prefixLength) {
+            let netmask = '';
+            for (let i = 0; i < 4; i++) {
+                if (prefixLength >= 8) {
+                    netmask += '255';
+                    prefixLength -= 8;
+                } else {
+                    let octet = 256 - Math.pow(2, 8 - prefixLength);
+                    netmask += octet;
+                    prefixLength = 0;
+                }
+                if (i < 3) netmask += '.';
+            }
+            return netmask;
+        }
+    
+        // Helper function to update IP prefixes based on CIDR
+        function updateIPPrefixes() {
+            const subnetValue = subnetCIDRInput.value.trim();
+            if (!isValidCIDR(subnetValue)) {
+                // Handle invalid CIDR
+                subnetCIDRError.textContent = 'Invalid subnet CIDR.';
+                subnetCIDRError.classList.remove('hidden');
+                subnetCIDRInput.classList.remove('valid');
+                subnetCIDRInput.classList.add('invalid');
+                currentPrefix = '';
+                clearIPPrefixes();
+                validRangeSpanConfig.textContent = '';
+                validRangeSpanConfig.classList.add('hidden');
+                return;
+            }
+
+            // Subnet CIDR is valid
+            subnetCIDRError.classList.add('hidden');
+            subnetCIDRInput.classList.remove('invalid');
+            subnetCIDRInput.classList.add('valid');
+
+            // Parse CIDR and update prefixes
+            address = ipaddr.parseCIDR(subnetValue);
+            const ipType = address[0].kind();
+            const prefixLength = address[1];
+
+            if (ipType === 'ipv4') {
+                ipSeparator = '.';
+                totalSegments = 4;
+
+                const subnetParts = address[0].toByteArray();
+                const editableBits = 32 - prefixLength;
+                const editableOctets = Math.ceil(editableBits / 8);
+
+                const prefixParts = subnetParts.slice(0, 4 - editableOctets);
+                currentPrefix = prefixParts.join('.') + (prefixParts.length > 0 ? '.' : '');
+
+                expectedSuffixLength = totalSegments - prefixParts.length;
+
+                // Calculate the IP range
+                const [firstIP, lastIP] = calculateIPv4Range(address[0], prefixLength);
+                validRangeSpanConfig.textContent = `Range: ${firstIP} - ${lastIP}`;
+                validRangeSpanConfig.classList.remove('hidden');
+            } else if (ipType === 'ipv6') {
+                ipSeparator = ':';
+                totalSegments = 8;
+
+                const subnetParts = address[0].toNormalizedString().split(':');
+                const editableBits = 128 - prefixLength;
+                const editableGroups = Math.ceil(editableBits / 16);
+
+                const prefixParts = subnetParts.slice(0, 8 - editableGroups);
+                currentPrefix = prefixParts.join(':') + (prefixParts.length > 0 ? ':' : '');
+
+                expectedSuffixLength = totalSegments - prefixParts.length;
+
+                // Calculate the IP range
+                const [firstIP, lastIP] = calculateIPv6Range(address[0], prefixLength);
+                validRangeSpanConfig.textContent = `Range: ${firstIP} - ${lastIP}`;
+                validRangeSpanConfig.classList.remove('hidden');
+            }
+
+            // Update displayed prefixes
+            vir0PrefixSpan.textContent = currentPrefix;
+            ct0PrefixSpan.textContent = currentPrefix;
+            ct1PrefixSpan.textContent = currentPrefix;
+            gatewayPrefixSpan.textContent = currentPrefix;
+
+            // Validate the IP inputs
+            //validateNetworkSettings();
+        }
+
+        function calculateIPv4Range(ipAddress, prefixLength) {
+            const ipInt = ipToInt(ipAddress.toString());
+            const netmaskInt = ~(Math.pow(2, 32 - prefixLength) - 1) >>> 0;
+            const networkInt = ipInt & netmaskInt;
+            const broadcastInt = networkInt | ~netmaskInt >>> 0;
+
+            const firstIPInt = networkInt + 1;
+            const lastIPInt = broadcastInt - 1;
+
+            const firstIP = intToIp(firstIPInt);
+            const lastIP = intToIp(lastIPInt);
+
+            return [firstIP, lastIP];
+        }
+
+        function ipToInt(ip) {
+            return ip.split('.').reduce((ipInt, octet) => {
+                return (ipInt << 8) + parseInt(octet, 10);
+            }, 0) >>> 0;
+        }
+
+        function intToIp(int) {
+            return ((int >>> 24) + '.' +
+                ((int >> 16) & 255) + '.' +
+                ((int >> 8) & 255) + '.' +
+                (int & 255));
+        }
+
+        function calculateIPv6Range(ipAddress, prefixLength) {
+            const addr = ipAddress.toNormalizedString();
+            const expanded = ipaddr.parse(addr).toNormalizedString();
+            const subnet = expanded.split(':');
+
+            const totalBits = 128;
+            const hostBits = totalBits - prefixLength;
+
+            // Calculate the first IP (network address)
+            const firstIP = ipAddress.toFixedLengthString();
+
+            // Calculate the last IP (broadcast address equivalent)
+            let maxAddress = ipaddr.IPv6.broadcastAddressFromCIDR(ipAddress.prefixLengthFromSubnetMask(prefixLength));
+
+            // For the last address, we can set all host bits to 1
+            // However, ipaddr.js doesn't provide a method for this, so we'll use BigInt
+            const ipBigInt = ipv6ToBigInt(ipAddress.toNormalizedString());
+            const maxHosts = BigInt(1) << BigInt(hostBits);
+            const lastIPBigInt = ipBigInt + maxHosts - BigInt(1);
+            const lastIP = bigIntToIpv6(lastIPBigInt);
+
+            return [firstIP, lastIP];
+        }
+
+        function ipv6ToBigInt(ipv6) {
+            const parts = ipv6.split(':');
+            let total = BigInt(0);
+            for (let i = 0; i < parts.length; i++) {
+                total = (total << BigInt(16)) + BigInt(parseInt(parts[i], 16));
+            }
+            return total;
+        }
+
+        function bigIntToIpv6(bigInt) {
+            let parts = [];
+            for (let i = 0; i < 8; i++) {
+                parts.unshift((bigInt & BigInt(0xffff)).toString(16));
+                bigInt = bigInt >> BigInt(16);
+            }
+            return parts.join(':');
+        }
+    
+        // Helper function to validate an individual IP input
+        function validateIPInput(ipInput, errorSpan) {
+            const ipValue = ipInput.value.trim();
+            const suffixSegments = ipValue.split(ipSeparator).filter(Boolean);
+            if (suffixSegments.length !== expectedSuffixLength) {
+                const segmentWord = expectedSuffixLength === 1 ? 'segment' : 'segments';
+                errorSpan.textContent = `Please enter ${expectedSuffixLength} ${segmentWord} for the IP suffix.`;
+                errorSpan.classList.remove('hidden');
+                return false;
+            }
+    
+            const fullIP = constructFullIP(ipValue);
+    
+            if (ipaddr.isValid(fullIP)) {
+                const ipAddress = ipaddr.parse(fullIP);
+                if (address[0].kind() === ipAddress.kind() && address[0].match(ipAddress, address[1])) {
+                    errorSpan.classList.add('hidden');
+                    return true;
+                } else {
+                    errorSpan.textContent = 'IP address is not within the subnet.';
+                    errorSpan.classList.remove('hidden');
+                    return false;
+                }
+            } else {
+                errorSpan.textContent = 'Invalid IP address.';
+                errorSpan.classList.remove('hidden');
+                return false;
+            }
+        }
+    
+        // Helper function to construct full IP address
+        function constructFullIP(ipSuffix) {
+            if (!currentPrefix) return '';
+            return currentPrefix.endsWith(ipSeparator) ? currentPrefix + ipSuffix : currentPrefix + ipSeparator + ipSuffix;
+        }
+    
+        // Helper function to reset IP validation states
+        function resetIPValidation() {
+            [subnetCIDRInput, gatewayIPInput, vir0IPInput, ct0IPInput, ct1IPInput].forEach(input => {
+                input.classList.remove('valid', 'invalid');
+            });
+            [gatewayGroup, vir0Group, ct0Group, ct1Group].forEach(group => {
+                group.classList.remove('valid', 'invalid');
+            });
+            [subnetCIDRError, gatewayError, vir0IPError, ct0IPError, ct1IPError, ipError].forEach(errorSpan => {
+                errorSpan.classList.add('hidden');
+            });
+        }
+    
+        // Helper function to clear IP prefixes
+        function clearIPPrefixes() {
+            vir0PrefixSpan.textContent = '';
+            ct0PrefixSpan.textContent = '';
+            ct1PrefixSpan.textContent = '';
+            gatewayPrefixSpan.textContent = '';
+        }
+    
+        // Helper function to check if a string is a valid CIDR notation
+        function isValidCIDR(cidr) {
+            try {
+                ipaddr.parseCIDR(cidr);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+    
+        // Real-time validation for other fields
+    
+        // Array name validation
+        arrayNameInput.addEventListener('input', () => {
+            const arrayName = arrayNameInput.value.trim();
+            if (validator.isFQDN(arrayName, { require_tld: false, allow_underscores: true })) {
+                arrayNameInput.classList.remove('invalid');
+                arrayNameInput.classList.add('valid');
+                arrayNameError.classList.add('hidden');
+            } else {
+                arrayNameInput.classList.remove('valid');
+                arrayNameInput.classList.add('invalid');
+                arrayNameError.textContent = 'Array name must be a valid hostname.';
+                arrayNameError.classList.remove('hidden');
+            }
+        });
+    
+        senderDomainInput.addEventListener('input', () => {
+            if (senderDomainInput.value.trim().length > 0) {
+                senderDomainInput.classList.remove('invalid');
+                senderDomainInput.classList.add('valid');
+                senderDomainError.classList.add('hidden');
+            } else {
+                senderDomainInput.classList.remove('valid');
+                senderDomainInput.classList.add('invalid');
+                senderDomainError.textContent = 'Sender domain is required.';
+                senderDomainError.classList.remove('hidden');
+            }
+        });
+    
+        ntpServersInput.addEventListener('input', () => {
+            const ntpServers = ntpServersInput.value.trim().split(',').map(s => s.trim()).filter(s => s);
+            const ntpValid = ntpServers.every(s => ipaddr.isValid(s) || validator.isFQDN(s));
+            if (ntpValid && ntpServers.length > 0) {
+                ntpServersInput.classList.remove('invalid');
+                ntpServersInput.classList.add('valid');
+                ntpError.classList.add('hidden');
+            } else {
+                ntpServersInput.classList.remove('valid');
+                ntpServersInput.classList.add('invalid');
+                ntpError.textContent = 'Please enter valid NTP server addresses or hostnames.';
+                ntpError.classList.remove('hidden');
+            }
+        });
+    
+        alertEmailsInput.addEventListener('input', () => {
+            const alertEmails = alertEmailsInput.value.trim().split(',').map(s => s.trim()).filter(s => s);
+            const emailsValid = alertEmails.every(e => validator.isEmail(e));
+            if (emailsValid && alertEmails.length > 0) {
+                alertEmailsInput.classList.remove('invalid');
+                alertEmailsInput.classList.add('valid');
+                alertEmailsError.classList.add('hidden');
+            } else {
+                alertEmailsInput.classList.remove('valid');
+                alertEmailsInput.classList.add('invalid');
+                alertEmailsError.textContent = 'Please enter valid email addresses.';
+                alertEmailsError.classList.remove('hidden');
+            }
+        });
+    
+        dnsNameserversInput.addEventListener('input', () => {
+            const dnsNameservers = dnsNameserversInput.value.trim().split(',').map(s => s.trim()).filter(s => s);
+            const dnsNameserversValid = dnsNameservers.every(s => ipaddr.isValid(s));
+            if (dnsNameserversValid && dnsNameservers.length > 0) {
+                dnsNameserversInput.classList.remove('invalid');
+                dnsNameserversInput.classList.add('valid');
+                dnsNameserversError.classList.add('hidden');
+            } else {
+                dnsNameserversInput.classList.remove('valid');
+                dnsNameserversInput.classList.add('invalid');
+                dnsNameserversError.textContent = 'Please enter valid IP addresses.';
+                dnsNameserversError.classList.remove('hidden');
+            }
+        });
+    
+        smtpRelayInput.addEventListener('input', () => {
+            const smtpRelayValue = smtpRelayInput.value.trim();
+            if (smtpRelayValue === '' || ipaddr.isValid(smtpRelayValue) || validator.isFQDN(smtpRelayValue)) {
+                smtpRelayInput.classList.remove('invalid');
+                smtpRelayInput.classList.add('valid');
+                smtpRelayError.classList.add('hidden');
+            } else {
+                smtpRelayInput.classList.remove('valid');
+                smtpRelayInput.classList.add('invalid');
+                smtpRelayError.textContent = 'Please enter a valid hostname or IP address.';
+                smtpRelayError.classList.remove('hidden');
+            }
+        });
+    
+        // EULA acceptance validation
+        eulaCheckbox.addEventListener('change', () => {
+            if (eulaCheckbox.checked) {
+                eulaCheckbox.classList.remove('invalid');
+            } else {
+                eulaCheckbox.classList.add('invalid');
+            }
+        });
+    
+        // Accepted by fields validation
+        organizationInput.addEventListener('input', validateAcceptedByFields);
+        fullNameInput.addEventListener('input', validateAcceptedByFields);
+        jobTitleInput.addEventListener('input', validateAcceptedByFields);
+    
+        function validateAcceptedByFields() {
+            if (organizationInput.value.trim().length > 0) {
+                organizationInput.classList.remove('invalid');
+                organizationInput.classList.add('valid');
+            } else {
+                organizationInput.classList.remove('valid');
+                organizationInput.classList.add('invalid');
+            }
+    
+            if (fullNameInput.value.trim().length > 0) {
+                fullNameInput.classList.remove('invalid');
+                fullNameInput.classList.add('valid');
+            } else {
+                fullNameInput.classList.remove('valid');
+                fullNameInput.classList.add('invalid');
+            }
+    
+            if (jobTitleInput.value.trim().length > 0) {
+                jobTitleInput.classList.remove('invalid');
+                jobTitleInput.classList.add('valid');
+            } else {
+                jobTitleInput.classList.remove('valid');
+                jobTitleInput.classList.add('invalid');
+            }
+        }
+    
+        // Configuration form submission
+        configForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+    
+            // Build configuration object
+            const ntpServers = ntpServersInput.value.trim()
+                ? ntpServersInput.value.trim().split(',').map(s => s.trim())
+                : [];
+            const alertEmails = alertEmailsInput.value.trim()
+                ? alertEmailsInput.value.trim().split(',').map(s => s.trim())
+                : [];
+            const dnsNameservers = dnsNameserversInput.value.trim()
+                ? dnsNameserversInput.value.trim().split(',').map(s => s.trim())
+                : [];
+            const dnsDomain = dnsDomainInput.value.trim() || '';
+            const smtpRelay = smtpRelayInput.value.trim() || '';
+    
+            // Get netmask
+            if (address) {
+                const prefixLength = address[1];
+                if (address[0].kind() === 'ipv4') {
+                    netmask = prefixLengthToNetmask(prefixLength);
+                } else {
+                    netmask = prefixLength.toString(); // For IPv6, keep the prefix length
+                }
+            } else {
+                netmask = null;
+            }
+    
+            const configData = {
+                "array_name": arrayNameInput.value.trim() || null,
+                [mgmtInterfaceSelect.value]: {
+                    "address": constructFullIP(ct0IPInput.value.trim()) || null,
+                    "netmask": netmask || null,
+                    "gateway": constructFullIP(gatewayIPInput.value.trim()) || null
+                },
+                [mgmtInterfaceSelect.value.replace('ct0', 'ct1')]: {
+                    "address": constructFullIP(ct1IPInput.value.trim()) || null,
+                    "netmask": netmask || null,
+                    "gateway": constructFullIP(gatewayIPInput.value.trim()) || null
+                },
+                "vir0": {
+                    "address": constructFullIP(vir0IPInput.value.trim()) || null,
+                    "netmask": netmask || null,
+                    "gateway": constructFullIP(gatewayIPInput.value.trim()) || null
+                },
+                "dns": {
+                    "domain": dnsDomain,
+                    "nameservers": dnsNameservers
+                },
+                "ntp_servers": ntpServers,
+                "timezone": timezoneSelect.value || null,
+                "smtp": {
+                    "relay_host": smtpRelay,
+                    "sender_domain": senderDomainInput.value.trim() || null
+                },
+                "alert_emails": alertEmails,
+                "eula_acceptance": {
+                    "accepted": eulaCheckbox.checked,
+                    "accepted_by": {
+                        "organization": organizationInput.value.trim() || null,
+                        "full_name": fullNameInput.value.trim() || null,
+                        "job_title": jobTitleInput.value.trim() || null
+                    }
+                }
+            };
+    
+            // Display configuration JSON
+            configOutputGroup.classList.remove('hidden');
+            configOutput.textContent = JSON.stringify(configData, null, 2);
+    
+            // Prepare download
+            downloadConfigBtn.onclick = () => {
+                const dataStr = JSON.stringify(configData, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'config.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+    
+            // Generate apply command
+            const arrayIP = arrayIPInput.value.trim();
+            const cmd = `curl -X PATCH -H "Content-Type: application/json" -d @config.json http://${arrayIP}:8081`;
+            applyCommand.textContent = cmd;
+    
+            copyApplyCmdBtn.onclick = () => {
+                navigator.clipboard.writeText(cmd);
+                alert('Command copied to clipboard!');
+            };
+        });
+    </script>
+</body>
+</html>

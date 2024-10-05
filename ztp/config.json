@@ -1,0 +1,56 @@
+
+{
+    "array_name": "fun-aus-pure01",
+    "ct0.eth4": 
+    {
+        "address": "10.235.57.46",
+        "netmask": "255.255.255.0",
+        "gateway": "10.21.1.1"
+    },
+    "ct1.eth4": 
+    {
+        "address": "10.235.57.47",
+        "netmask": "255.255.255.0",
+        "gateway": "10.21.1.1"
+    },
+    "vir0": 
+    {
+        "address": "10.235.57.45",
+        "netmask": "255.255.255.0",
+        "gateway": "10.21.1.1"
+    },
+    "dns": 
+    {
+        "domain": "example.com",
+        "nameservers": 
+        [
+            "10.235.84.25", 
+            "10.235.84.26"
+        ]
+    },
+    "ntp_servers": 
+    [
+        "10.176.3.1",
+        "10.229.99.9"
+    ],
+    "timezone": "US/Central",
+    "smtp": 
+    {
+        "relay_host": "",
+        "sender_domain": "example.com"
+    },
+    "alert_emails": 
+    [
+            "storage@example.com"
+    ],
+    "eula_acceptance": 
+    {
+        "accepted": true,
+        "accepted_by": 
+        {
+            "organization": "Example Inc",
+            "full_name": "Kenny",
+            "job_title": "Student"
+        }
+    }
+}
