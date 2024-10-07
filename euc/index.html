@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PureStorage Capacity Chart</title>
+    <!-- Link to Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #ffffff;
+            padding: 20px;
+            color: #333333;
+        }
+        header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+        header img {
+            height: 50px;
+            margin-right: 20px;
+        }
+        header h1 {
+            color: #e87722;
+            font-size: 2em;
+            margin: 0;
+        }
+        .input-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 30px;
+            justify-content: center;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .input-group label {
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .input-group input {
+            padding: 8px;
+            width: 150px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .button-container {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .button-container button {
+            padding: 10px 20px;
+            background-color: #e87722;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease;
+        }
+        .button-container button:hover {
+            background-color: #d16b1c;
+        }
+        #chart-container {
+            max-width: 800px;
+            margin: auto;
+        }
+        @media (max-width: 600px) {
+            .input-group input {
+                width: 100%;
+            }
+            .input-container {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <!-- Placeholder for PureStorage Logo -->
+        <img src="https://via.placeholder.com/150x50?text=PureStorage+Logo" alt="PureStorage Logo">
+        <h1>PureStorage Capacity Usage</h1>
+    </header>
+
+    <div class="input-container">
+        <div class="input-group">
+            <label for="allocated">Allocated Capacity (T):</label>
+            <input type="number" id="allocated" value="100" min="0">
+        </div>
+
+        <div class="input-group">
+            <label for="euc">EUC (T):</label>
+            <input type="number" id="euc" value="70" min="0">
+        </div>
+
+        <div class="input-group">
+            <label for="drr">DRR (Data Reduction Rate):</label>
+            <input type="number" id="drr" step="0.1" value="6.1" min="0">
+        </div>
+    </div>
+
+    <div class="button-container">
+        <button onclick="updateChart()">Generate Chart</button>
+    </div>
+
+    <div id="chart-container">
+        <canvas id="capacityChart"></canvas>
+    </div>
+
+    <script>
+        // Initialize Chart.js chart
+        const ctx = document.getElementById('capacityChart').getContext('2d');
+        let capacityChart;
+
+        function initializeChart(allocated, euc, reduced) {
+            if (capacityChart) {
+                capacityChart.destroy();
+            }
+
+            capacityChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Capacity'],
+                    datasets: [
+                        {
+                            label: 'Effective Used Capacity',
+                            data: [euc],
+                            backgroundColor: '#e87722',
+                            stack: 'Stack 0',
+                            borderRadius: 5
+                        },
+                        {
+                            label: 'Unused',
+                            data: [allocated - euc],
+                            backgroundColor: '#f4a460',
+                            stack: 'Stack 0',
+                            borderRadius: 5
+                        },
+                        {
+                            label: 'Reduced',
+                            data: [reduced],
+                            backgroundColor: '#ffd699',
+                            stack: 'Stack 1',
+                            borderRadius: 5
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                font: {
+                                    size: 14
+                                }
+                            }
+                        },
+                        tooltip: {
+                            enabled: true
+                        }
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                            title: {
+                                display: true,
+                                text: 'Capacity Metrics',
+                                font: {
+                                    size: 16,
+                                    weight: 'bold'
+                                }
+                            }
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Terabytes (T)',
+                                font: {
+                                    size: 16,
+                                    weight: 'bold'
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function calculateReduced(euc, drr) {
+            if (drr === 0) return 0;
+            return euc / drr;
+        }
+
+        function updateChart() {
+            const allocated = parseFloat(document.getElementById('allocated').value) || 0;
+            const euc = parseFloat(document.getElementById('euc').value) || 0;
+            const drr = parseFloat(document.getElementById('drr').value) || 1; // Avoid division by zero
+
+            // Validate inputs
+            if (euc > allocated) {
+                alert('EUC cannot exceed Allocated Capacity.');
+                return;
+            }
+
+            const reduced = calculateReduced(euc, drr);
+
+            initializeChart(allocated, euc, reduced);
+        }
+
+        // Initialize default chart on page load
+        window.onload = function() {
+            const allocated = parseFloat(document.getElementById('allocated').value) || 0;
+            const euc = parseFloat(document.getElementById('euc').value) || 0;
+            const drr = parseFloat(document.getElementById('drr').value) || 1;
+
+            const reduced = calculateReduced(euc, drr);
+            initializeChart(allocated, euc, reduced);
+        };
+    </script>
+
+</body>
+</html>

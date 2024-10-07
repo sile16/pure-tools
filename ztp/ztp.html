@@ -282,6 +282,7 @@
     </div>
 
     <!-- Scripts -->
+    <!-- Scripts -->
     <script>
         // Declare global variables
         let address;
@@ -290,7 +291,7 @@
         let ipSeparator = '.';
         let totalSegments = 4; // For IPv4 (use 8 for IPv6)
         let expectedSuffixLength = 0;
-    
+
         // Get references to DOM elements
         const timezoneSelect = document.getElementById('timezone');
         const subnetInput = document.getElementById('subnet-input');
@@ -353,28 +354,88 @@
         const copyApplyCmdBtn = document.getElementById('copy-apply-cmd');
         const dnsDomainInput = document.getElementById('dns-domain');
         const validRangeSpanConfig = document.getElementById('valid-range-config');
-    
+
         // Include full timezone list
         const timezones = [
-            /* Full list of timezones */
-            "Africa/Abidjan",
-            "Africa/Accra",
-            // ... (rest of the timezones)
-            "UTC"
+            "UTC",
+            "US/Eastern",
+            "US/Central",
+            "US/Mountain",
+            "US/Pacific",
+            "US/Alaska",
+            "US/Aleutian",
+            "US/Arizona",
+            "US/East-Indiana",
+            "US/Hawaii",
+            "US/Indiana-Starke",
+            "US/Michigan",
+            "US/Samoa",
+            "Canada/Newfoundland",
+            "Canada/Atlantic",
+            "Canada/Eastern",
+            "Canada/Central",
+            "Canada/Mountain",
+            "Canada/Pacific",
+            "Canada/Yukon",
+            "Canada/Saskatchewan",
+            "GMT",
+            "Universal",
+            "Zulu",
+            "MET",
+            "NET",
+            "WET",
+            "EST",
+            "EST5EDT",
+            "CST",
+            "CST6CDT",
+            "MST",
+            "MST7MDT",
+            "PST",
+            "PST8PDT",
+            "Etc/GMT",
+            "Etc/GMT+0",
+            "Etc/GMT+1",
+            "Etc/GMT+2",
+            "Etc/GMT+3",
+            "Etc/GMT+4",
+            "Etc/GMT+5",
+            "Etc/GMT+6",
+            "Etc/GMT+7",
+            "Etc/GMT+8",
+            "Etc/GMT+9",
+            "Etc/GMT+10",
+            "Etc/GMT+11",
+            "Etc/GMT+12",
+            "Etc/GMT-0",
+            "Etc/GMT-1",
+            "Etc/GMT-2",
+            "Etc/GMT-3",
+            "Etc/GMT-4",
+            "Etc/GMT-5",
+            "Etc/GMT-6",
+            "Etc/GMT-7",
+            "Etc/GMT-8",
+            "Etc/GMT-9",
+            "Etc/GMT-10",
+            "Etc/GMT-11",
+            "Etc/GMT-12",
+            "Etc/UTC",
+            "Etc/Universal",
+            "Etc/Zulu"
         ];
-    
+
         timezones.forEach(tz => {
             const option = document.createElement('option');
             option.value = tz;
             option.textContent = tz;
             timezoneSelect.appendChild(option);
         });
-    
+
         // EULA acceptance handling
         eulaLink.addEventListener('click', () => {
             eulaCheckbox.disabled = false;
         });
-    
+
         // Subnet scanning command generation
         subnetInput.addEventListener('input', () => {
             const subnetValue = subnetInput.value.trim();
@@ -384,7 +445,7 @@
                 subnetInput.classList.add('valid');
                 const nmapCmd = `nmap -p 8081 --open ${subnetValue}`;
                 scanCommand.textContent = nmapCmd;
-    
+
                 // Display valid IP range (Not available directly with ipaddr.js)
                 validRangeSpan.textContent = '';
                 validRangeSpan.classList.add('hidden');
@@ -398,12 +459,12 @@
                 validRangeSpan.classList.add('hidden');
             }
         });
-    
+
         copyScanCmd.addEventListener('click', () => {
             navigator.clipboard.writeText(scanCommand.textContent);
             alert('Command copied to clipboard!');
         });
-    
+
         // Fetch array details command generation
         arrayIPInput.addEventListener('input', () => {
             const arrayIP = arrayIPInput.value.trim();
@@ -421,12 +482,12 @@
                 fetchCommand.textContent = '';
             }
         });
-    
+
         copyFetchCmd.addEventListener('click', () => {
             navigator.clipboard.writeText(fetchCommand.textContent);
             alert('Command copied to clipboard!');
         });
-    
+
         // Fetch array details
         fetchArrayDetailsBtn.addEventListener('click', () => {
             const arrayIP = arrayIPInput.value.trim();
@@ -439,11 +500,11 @@
                 arrayIPError.classList.add('hidden');
                 arrayIPInput.classList.remove('invalid');
             }
-    
+
             fetchLoading.classList.remove('hidden');
             arrayDetails.textContent = '';
             arrayFetchError.classList.add('hidden');
-    
+
             fetch(`http://${arrayIP}:8081`)
                 .then(response => {
                     fetchLoading.classList.add('hidden');
@@ -461,7 +522,7 @@
                     arrayFetchError.classList.remove('hidden');
                 });
         });
-    
+
         // Handle array details file upload
         arrayDetailsFileInput.addEventListener('change', (event) => {
             const file = event.target.files[0];
@@ -483,99 +544,20 @@
                 arrayFileError.classList.remove('hidden');
             }
         });
-    
+
         // Add event listeners to subnet CIDR and IP inputs
         [subnetCIDRInput, gatewayIPInput, vir0IPInput, ct0IPInput, ct1IPInput].forEach(input => {
             input.addEventListener('input', validateNetworkSettings);
         });
-    
+
         // Main validation function
         function validateNetworkSettings() {
             // Assume inputs are invalid by default
             resetIPValidation();
-    
+
             // Validate Subnet CIDR
             const subnetValue = subnetCIDRInput.value.trim();
             if (!isValidCIDR(subnetValue)) {
-                subnetCIDRError.textContent = 'Invalid subnet CIDR.';
-                subnetCIDRError.classList.remove('hidden');
-                subnetCIDRInput.classList.remove('valid');
-                subnetCIDRInput.classList.add('invalid');
-                currentPrefix = '';
-                clearIPPrefixes();
-                return;
-            }
-    
-            // Subnet CIDR is valid
-            subnetCIDRError.classList.add('hidden');
-            subnetCIDRInput.classList.remove('invalid');
-            subnetCIDRInput.classList.add('valid');
-    
-            // Parse CIDR and update prefixes
-            address = ipaddr.parseCIDR(subnetValue);
-            updateIPPrefixes();
-    
-            // Validate each IP address
-            const ipInputs = [
-                { input: gatewayIPInput, group: gatewayGroup, errorSpan: gatewayError, prefixSpan: gatewayPrefixSpan },
-                { input: vir0IPInput, group: vir0Group, errorSpan: vir0IPError, prefixSpan: vir0PrefixSpan },
-                { input: ct0IPInput, group: ct0Group, errorSpan: ct0IPError, prefixSpan: ct0PrefixSpan },
-                { input: ct1IPInput, group: ct1Group, errorSpan: ct1IPError, prefixSpan: ct1PrefixSpan }
-            ];
-    
-            let allIPsValid = true;
-            const ipAddresses = [];
-    
-            ipInputs.forEach(({ input, group, errorSpan, prefixSpan }) => {
-                const ipValid = validateIPInput(input, errorSpan);
-                if (ipValid) {
-                    group.classList.remove('invalid');
-                    group.classList.add('valid');
-                    ipAddresses.push(constructFullIP(input.value.trim()));
-                } else {
-                    group.classList.remove('valid');
-                    group.classList.add('invalid');
-                    allIPsValid = false;
-                }
-            });
-    
-            // Check for unique IP addresses
-            if (allIPsValid) {
-                const uniqueIPs = new Set(ipAddresses);
-                if (uniqueIPs.size !== ipAddresses.length) {
-                    ipError.textContent = 'All IP addresses must be unique.';
-                    ipError.classList.remove('hidden');
-                    ipInputs.forEach(({ group }) => {
-                        group.classList.remove('valid');
-                        group.classList.add('invalid');
-                    });
-                } else {
-                    ipError.classList.add('hidden');
-                }
-            }
-        }
-
-        function prefixLengthToNetmask(prefixLength) {
-            let netmask = '';
-            for (let i = 0; i < 4; i++) {
-                if (prefixLength >= 8) {
-                    netmask += '255';
-                    prefixLength -= 8;
-                } else {
-                    let octet = 256 - Math.pow(2, 8 - prefixLength);
-                    netmask += octet;
-                    prefixLength = 0;
-                }
-                if (i < 3) netmask += '.';
-            }
-            return netmask;
-        }
-    
-        // Helper function to update IP prefixes based on CIDR
-        function updateIPPrefixes() {
-            const subnetValue = subnetCIDRInput.value.trim();
-            if (!isValidCIDR(subnetValue)) {
-                // Handle invalid CIDR
                 subnetCIDRError.textContent = 'Invalid subnet CIDR.';
                 subnetCIDRError.classList.remove('hidden');
                 subnetCIDRInput.classList.remove('valid');
@@ -594,6 +576,55 @@
 
             // Parse CIDR and update prefixes
             address = ipaddr.parseCIDR(subnetValue);
+            updateIPPrefixes();
+
+            // Validate IP inputs
+            validateIPInputs();
+        }
+
+        function validateIPInputs() {
+            const ipInputs = [
+                { input: gatewayIPInput, group: gatewayGroup, errorSpan: gatewayError, prefixSpan: gatewayPrefixSpan },
+                { input: vir0IPInput, group: vir0Group, errorSpan: vir0IPError, prefixSpan: vir0PrefixSpan },
+                { input: ct0IPInput, group: ct0Group, errorSpan: ct0IPError, prefixSpan: ct0PrefixSpan },
+                { input: ct1IPInput, group: ct1Group, errorSpan: ct1IPError, prefixSpan: ct1PrefixSpan }
+            ];
+
+            let allIPsValid = true;
+            const ipAddresses = [];
+
+            ipInputs.forEach(({ input, group, errorSpan, prefixSpan }) => {
+                const ipValid = validateIPInput(input, errorSpan);
+                if (ipValid) {
+                    group.classList.remove('invalid');
+                    group.classList.add('valid');
+                    ipAddresses.push(constructFullIP(input.value.trim()));
+                } else {
+                    group.classList.remove('valid');
+                    group.classList.add('invalid');
+                    allIPsValid = false;
+                }
+            });
+
+            // Check for unique IP addresses
+            if (allIPsValid) {
+                const uniqueIPs = new Set(ipAddresses);
+                if (uniqueIPs.size !== ipAddresses.length) {
+                    ipError.textContent = 'All IP addresses must be unique.';
+                    ipError.classList.remove('hidden');
+                    ipInputs.forEach(({ group }) => {
+                        group.classList.remove('valid');
+                        group.classList.add('invalid');
+                    });
+                } else {
+                    ipError.classList.add('hidden');
+                }
+            }
+        }
+
+        // Helper function to update IP prefixes based on CIDR
+        function updateIPPrefixes() {
+            const subnetValue = subnetCIDRInput.value.trim();
             const ipType = address[0].kind();
             const prefixLength = address[1];
 
@@ -618,11 +649,20 @@
                 ipSeparator = ':';
                 totalSegments = 8;
 
-                const subnetParts = address[0].toNormalizedString().split(':');
-                const editableBits = 128 - prefixLength;
-                const editableGroups = Math.ceil(editableBits / 16);
+                const subnetParts = address[0].parts.map(part => part.toString(16));
+                const networkBits = prefixLength;
+                const fullHextets = Math.floor(networkBits / 16);
+                const remainingBits = networkBits % 16;
 
-                const prefixParts = subnetParts.slice(0, 8 - editableGroups);
+                let prefixParts = subnetParts.slice(0, fullHextets);
+
+                if (remainingBits > 0) {
+                    const partValue = address[0].parts[fullHextets];
+                    const mask = 0xFFFF << (16 - remainingBits) & 0xFFFF;
+                    const maskedValue = partValue & mask;
+                    prefixParts.push(maskedValue.toString(16));
+                }
+
                 currentPrefix = prefixParts.join(':') + (prefixParts.length > 0 ? ':' : '');
 
                 expectedSuffixLength = totalSegments - prefixParts.length;
@@ -638,9 +678,6 @@
             ct0PrefixSpan.textContent = currentPrefix;
             ct1PrefixSpan.textContent = currentPrefix;
             gatewayPrefixSpan.textContent = currentPrefix;
-
-            // Validate the IP inputs
-            //validateNetworkSettings();
         }
 
         function calculateIPv4Range(ipAddress, prefixLength) {
@@ -672,31 +709,24 @@
         }
 
         function calculateIPv6Range(ipAddress, prefixLength) {
-            const addr = ipAddress.toNormalizedString();
-            const expanded = ipaddr.parse(addr).toNormalizedString();
-            const subnet = expanded.split(':');
-
-            const totalBits = 128;
-            const hostBits = totalBits - prefixLength;
-
-            // Calculate the first IP (network address)
-            const firstIP = ipAddress.toFixedLengthString();
-
-            // Calculate the last IP (broadcast address equivalent)
-            let maxAddress = ipaddr.IPv6.broadcastAddressFromCIDR(ipAddress.prefixLengthFromSubnetMask(prefixLength));
-
-            // For the last address, we can set all host bits to 1
-            // However, ipaddr.js doesn't provide a method for this, so we'll use BigInt
+            // Convert the IP address to a BigInt
             const ipBigInt = ipv6ToBigInt(ipAddress.toNormalizedString());
-            const maxHosts = BigInt(1) << BigInt(hostBits);
-            const lastIPBigInt = ipBigInt + maxHosts - BigInt(1);
-            const lastIP = bigIntToIpv6(lastIPBigInt);
 
-            return [firstIP, lastIP];
+            // Calculate the network address
+            const networkMask = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF') << BigInt(128 - prefixLength);
+            const networkAddressBigInt = ipBigInt & networkMask;
+            const networkAddress = bigIntToIpv6(networkAddressBigInt);
+
+            // Calculate the last address in the subnet
+            const broadcastAddressBigInt = networkAddressBigInt | (~networkMask & BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'));
+            const broadcastAddress = bigIntToIpv6(broadcastAddressBigInt);
+
+            return [networkAddress, broadcastAddress];
         }
 
         function ipv6ToBigInt(ipv6) {
-            const parts = ipv6.split(':');
+            const expanded = expandIPv6(ipv6);
+            const parts = expanded.split(':');
             let total = BigInt(0);
             for (let i = 0; i < parts.length; i++) {
                 total = (total << BigInt(16)) + BigInt(parseInt(parts[i], 16));
@@ -707,25 +737,68 @@
         function bigIntToIpv6(bigInt) {
             let parts = [];
             for (let i = 0; i < 8; i++) {
-                parts.unshift((bigInt & BigInt(0xffff)).toString(16));
+                parts.unshift((bigInt & BigInt(0xFFFF)).toString(16));
                 bigInt = bigInt >> BigInt(16);
             }
-            return parts.join(':');
+            // Compress the IPv6 address
+            return compressIPv6(parts.join(':'));
         }
-    
-        // Helper function to validate an individual IP input
+
+        function expandIPv6(ipv6) {
+            // Expand the IPv6 address to its full representation
+            const parts = ipv6.split('::');
+            let left = parts[0].split(':');
+            let right = parts[1] ? parts[1].split(':') : [];
+            const missing = 8 - (left.length + right.length);
+            const zeros = Array(missing).fill('0');
+            return [...left, ...zeros, ...right].join(':');
+        }
+
+        function compressIPv6(ipv6) {
+            // Compress the IPv6 address to its shortest possible representation
+            // This is a simplified version; for full compression rules, a more complex algorithm is needed
+            return ipv6.replace(/(^|:)0(:0)+(:|$)/, '$1::').replace(/(^|:)0(:|$)/g, '$1$2');
+        }
+
+
         function validateIPInput(ipInput, errorSpan) {
             const ipValue = ipInput.value.trim();
-            const suffixSegments = ipValue.split(ipSeparator).filter(Boolean);
-            if (suffixSegments.length !== expectedSuffixLength) {
-                const segmentWord = expectedSuffixLength === 1 ? 'segment' : 'segments';
-                errorSpan.textContent = `Please enter ${expectedSuffixLength} ${segmentWord} for the IP suffix.`;
+
+            if (!currentPrefix) {
+                errorSpan.textContent = 'Please enter a valid subnet CIDR first.';
                 errorSpan.classList.remove('hidden');
                 return false;
             }
-    
+
+            const suffixSegments = ipValue.split(ipSeparator).filter(Boolean);
+
+            if (ipSeparator === ':') {
+                // For IPv6, handle possible '::' in suffix
+                let suffixSegmentCount = ipValue.split(':').filter(Boolean).length;
+                const totalColons = (ipValue.match(/:/g) || []).length;
+
+                if (ipValue.includes('::')) {
+                    const missingSegments = totalSegments - currentPrefix.split(':').filter(Boolean).length - suffixSegments.length + 1;
+                    suffixSegmentCount += missingSegments;
+                }
+
+                if (suffixSegmentCount !== expectedSuffixLength) {
+                    const segmentWord = expectedSuffixLength === 1 ? 'segment' : 'segments';
+                    errorSpan.textContent = `Please enter ${expectedSuffixLength} ${segmentWord} for the IP suffix.`;
+                    errorSpan.classList.remove('hidden');
+                    return false;
+                }
+            } else {
+                if (suffixSegments.length !== expectedSuffixLength) {
+                    const segmentWord = expectedSuffixLength === 1 ? 'segment' : 'segments';
+                    errorSpan.textContent = `Please enter ${expectedSuffixLength} ${segmentWord} for the IP suffix.`;
+                    errorSpan.classList.remove('hidden');
+                    return false;
+                }
+            }
+
             const fullIP = constructFullIP(ipValue);
-    
+
             if (ipaddr.isValid(fullIP)) {
                 const ipAddress = ipaddr.parse(fullIP);
                 if (address[0].kind() === ipAddress.kind() && address[0].match(ipAddress, address[1])) {
@@ -742,13 +815,23 @@
                 return false;
             }
         }
-    
-        // Helper function to construct full IP address
+
         function constructFullIP(ipSuffix) {
             if (!currentPrefix) return '';
-            return currentPrefix.endsWith(ipSeparator) ? currentPrefix + ipSuffix : currentPrefix + ipSeparator + ipSuffix;
+            if (ipSeparator === ':') {
+                // For IPv6
+                let fullIP = currentPrefix + ipSuffix;
+                // Normalize the IP address
+                try {
+                    return ipaddr.IPv6.parse(fullIP).toNormalizedString();
+                } catch (e) {
+                    return '';
+                }
+            } else {
+                return currentPrefix.endsWith(ipSeparator) ? currentPrefix + ipSuffix : currentPrefix + ipSeparator + ipSuffix;
+            }
         }
-    
+
         // Helper function to reset IP validation states
         function resetIPValidation() {
             [subnetCIDRInput, gatewayIPInput, vir0IPInput, ct0IPInput, ct1IPInput].forEach(input => {
@@ -761,7 +844,7 @@
                 errorSpan.classList.add('hidden');
             });
         }
-    
+
         // Helper function to clear IP prefixes
         function clearIPPrefixes() {
             vir0PrefixSpan.textContent = '';
@@ -769,7 +852,7 @@
             ct1PrefixSpan.textContent = '';
             gatewayPrefixSpan.textContent = '';
         }
-    
+
         // Helper function to check if a string is a valid CIDR notation
         function isValidCIDR(cidr) {
             try {
@@ -779,9 +862,28 @@
                 return false;
             }
         }
-    
+
+        // Function to convert prefix length to netmask
+        function prefixLengthToNetmask(prefixLength) {
+            let netmask = '';
+            for (let i = 0; i < 4; i++) {
+                if (prefixLength >= 8) {
+                    netmask += '255';
+                    prefixLength -= 8;
+                } else if (prefixLength > 0) {
+                    let octet = 256 - Math.pow(2, 8 - prefixLength);
+                    netmask += octet;
+                    prefixLength = 0;
+                } else {
+                    netmask += '0';
+                }
+                if (i < 3) netmask += '.';
+            }
+            return netmask;
+        }
+
         // Real-time validation for other fields
-    
+
         // Array name validation
         arrayNameInput.addEventListener('input', () => {
             const arrayName = arrayNameInput.value.trim();
@@ -796,7 +898,7 @@
                 arrayNameError.classList.remove('hidden');
             }
         });
-    
+
         senderDomainInput.addEventListener('input', () => {
             if (senderDomainInput.value.trim().length > 0) {
                 senderDomainInput.classList.remove('invalid');
@@ -809,7 +911,7 @@
                 senderDomainError.classList.remove('hidden');
             }
         });
-    
+
         ntpServersInput.addEventListener('input', () => {
             const ntpServers = ntpServersInput.value.trim().split(',').map(s => s.trim()).filter(s => s);
             const ntpValid = ntpServers.every(s => ipaddr.isValid(s) || validator.isFQDN(s));
@@ -824,7 +926,7 @@
                 ntpError.classList.remove('hidden');
             }
         });
-    
+
         alertEmailsInput.addEventListener('input', () => {
             const alertEmails = alertEmailsInput.value.trim().split(',').map(s => s.trim()).filter(s => s);
             const emailsValid = alertEmails.every(e => validator.isEmail(e));
@@ -839,7 +941,7 @@
                 alertEmailsError.classList.remove('hidden');
             }
         });
-    
+
         dnsNameserversInput.addEventListener('input', () => {
             const dnsNameservers = dnsNameserversInput.value.trim().split(',').map(s => s.trim()).filter(s => s);
             const dnsNameserversValid = dnsNameservers.every(s => ipaddr.isValid(s));
@@ -854,7 +956,7 @@
                 dnsNameserversError.classList.remove('hidden');
             }
         });
-    
+
         smtpRelayInput.addEventListener('input', () => {
             const smtpRelayValue = smtpRelayInput.value.trim();
             if (smtpRelayValue === '' || ipaddr.isValid(smtpRelayValue) || validator.isFQDN(smtpRelayValue)) {
@@ -868,7 +970,7 @@
                 smtpRelayError.classList.remove('hidden');
             }
         });
-    
+
         // EULA acceptance validation
         eulaCheckbox.addEventListener('change', () => {
             if (eulaCheckbox.checked) {
@@ -877,12 +979,12 @@
                 eulaCheckbox.classList.add('invalid');
             }
         });
-    
+
         // Accepted by fields validation
         organizationInput.addEventListener('input', validateAcceptedByFields);
         fullNameInput.addEventListener('input', validateAcceptedByFields);
         jobTitleInput.addEventListener('input', validateAcceptedByFields);
-    
+
         function validateAcceptedByFields() {
             if (organizationInput.value.trim().length > 0) {
                 organizationInput.classList.remove('invalid');
@@ -891,7 +993,7 @@
                 organizationInput.classList.remove('valid');
                 organizationInput.classList.add('invalid');
             }
-    
+
             if (fullNameInput.value.trim().length > 0) {
                 fullNameInput.classList.remove('invalid');
                 fullNameInput.classList.add('valid');
@@ -899,7 +1001,7 @@
                 fullNameInput.classList.remove('valid');
                 fullNameInput.classList.add('invalid');
             }
-    
+
             if (jobTitleInput.value.trim().length > 0) {
                 jobTitleInput.classList.remove('invalid');
                 jobTitleInput.classList.add('valid');
@@ -908,11 +1010,11 @@
                 jobTitleInput.classList.add('invalid');
             }
         }
-    
+
         // Configuration form submission
         configForm.addEventListener('submit', (event) => {
             event.preventDefault();
-    
+
             // Build configuration object
             const ntpServers = ntpServersInput.value.trim()
                 ? ntpServersInput.value.trim().split(',').map(s => s.trim())
@@ -925,7 +1027,7 @@
                 : [];
             const dnsDomain = dnsDomainInput.value.trim() || '';
             const smtpRelay = smtpRelayInput.value.trim() || '';
-    
+
             // Get netmask
             if (address) {
                 const prefixLength = address[1];
@@ -937,7 +1039,7 @@
             } else {
                 netmask = null;
             }
-    
+
             const configData = {
                 "array_name": arrayNameInput.value.trim() || null,
                 [mgmtInterfaceSelect.value]: {
@@ -975,11 +1077,11 @@
                     }
                 }
             };
-    
+
             // Display configuration JSON
             configOutputGroup.classList.remove('hidden');
             configOutput.textContent = JSON.stringify(configData, null, 2);
-    
+
             // Prepare download
             downloadConfigBtn.onclick = () => {
                 const dataStr = JSON.stringify(configData, null, 2);
@@ -991,17 +1093,18 @@
                 a.click();
                 URL.revokeObjectURL(url);
             };
-    
+
             // Generate apply command
             const arrayIP = arrayIPInput.value.trim();
             const cmd = `curl -X PATCH -H "Content-Type: application/json" -d @config.json http://${arrayIP}:8081`;
             applyCommand.textContent = cmd;
-    
+
             copyApplyCmdBtn.onclick = () => {
                 navigator.clipboard.writeText(cmd);
                 alert('Command copied to clipboard!');
             };
         });
     </script>
+
 </body>
 </html>
