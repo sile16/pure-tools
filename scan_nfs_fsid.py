@@ -1,78 +1,68 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 #
-# scan_nfs_fsid.py <ip>
+# scan_nfs_fsid.py <ip> [uid gid hostname]
+# Python 2.7.5, no external modules.
 #
-# Python 2.7.5-compatible. No third-party modules.
-# Does raw ONC-RPC over UDP to list exports (mountd v3), mount each,
-# then calls NFSv3 GETATTR to read the FSID and prints it.
+# - Portmap GETPORT (UDP) to discover mountd v3 and nfs v3 ports
+# - MOUNTPROC_EXPORT (v3) over UDP to get export list
+# - MOUNTPROC_MNT (v3) over UDP to get file handle
+# - NFSv3 GETATTR over **TCP** with **AUTH_SYS** to read FSID
 #
-# Notes:
-# - Requires that the server's mountd allows MNT from your host.
-# - Works best when server supports NFSv3.
-# - Uses AUTH_NULL by default; many servers accept that for EXPORTS/MNT/GETATTR.
-#
-import sys
-import socket
-import struct
-import random
-import time
+import sys, socket, struct, random, time
 
-PMAP_PROG   = 100000
-PMAP_VERS   = 2
-PMAP_GETPORT= 3
+PMAP_PROG, PMAP_VERS, PMAP_GETPORT = 100000, 2, 3
+MNT_PROG, MNT_VERS3 = 100005, 3
+MNT_PROC_MNT, MNT_PROC_EXPORT = 1, 5
+MNT3_OK = 0
 
-MNT_PROG    = 100005
-MNT_VERS3   = 3
-MNT_PROC_MNT= 1
-MNT_PROC_EXPORT=5
-MNT3_OK     = 0
-
-NFS_PROG    = 100003
-NFS_VERS3   = 3
-NFS3_GETATTR= 1
-NFS3_OK     = 0
+NFS_PROG, NFS_VERS3 = 100003, 3
+NFS3_GETATTR, NFS3_OK = 1, 0
 
 IPPROTO_UDP = 17
 
-RPC_CALL    = 0
-RPC_REPLY   = 1
-RPC_VERS    = 2
-
-AUTH_NULL   = 0
-AUTH_UNIX   = 1
-MSG_ACCEPTED= 0
-SUCCESS     = 0
+RPC_CALL, RPC_REPLY, RPC_VERS = 0, 1, 2
+AUTH_NULL, AUTH_UNIX = 0, 1
+MSG_ACCEPTED, SUCCESS = 0, 0
 
 def be32(x): return struct.pack(">I", x & 0xffffffff)
-def be32u(data, off):
-    return struct.unpack(">I", data[off:off+4])[0], off+4
+def be32u(buf, off): return struct.unpack(">I", buf[off:off+4])[0], off+4
+def xdr_pad_len(n): return ((n + 3) // 4) * 4
 
-def be64u_from_two32(hi, lo):
-    return (hi << 32) | lo
-
-def xdr_pad_len(n):
-    return ((n + 3) // 4) * 4
+def xdr_bytes(b):
+    ln = len(b)
+    pad = xdr_pad_len(ln) - ln
+    return be32(ln) + b + ("\x00" * pad)
 
 def xdr_string(s):
     if isinstance(s, unicode):
         s = s.encode("utf-8")
-    ln = len(s)
-    pad = xdr_pad_len(ln) - ln
-    return be32(ln) + s + ("\x00" * pad)
-
-def xdr_opaque(buf):
-    ln = len(buf)
-    pad = xdr_pad_len(ln) - ln
-    return be32(ln) + buf + ("\x00" * pad)
+    return xdr_bytes(s)
 
 def xdr_auth_null():
-    # opaque_auth { flavor, length, body[] }
+    # opaque_auth { flavor(u32), length(u32), body[] }
     return be32(AUTH_NULL) + be32(0)
 
-def rpc_call_msg(xid, prog, vers, proc, cred=None, verf=None, body=""):
-    if cred is None: cred = xdr_auth_null()
-    if verf is None: verf = xdr_auth_null()
+def xdr_auth_sys(uid, gid, hostname, auxgids=None):
+    if auxgids is None:
+        auxgids = []
+    if isinstance(hostname, unicode):
+        hostname = hostname.encode("utf-8")
+    # AUTH_UNIX fields:
+    # stamp(u32), machinename(string), uid(u32), gid(u32), len(u32), gids[len](u32)
+    stamp = 0
+    body = []
+    body.append(be32(stamp))
+    body.append(xdr_string(hostname))
+    body.append(be32(uid))
+    body.append(be32(gid))
+    body.append(be32(len(auxgids)))
+    for g in auxgids:
+        body.append(be32(g))
+    body = "".join(body)
+    return be32(AUTH_UNIX) + be32(len(body)) + body + ("\x00" * (xdr_pad_len(len(body)) - len(body)))
+
+def rpc_call_msg(xid, prog, vers, proc, cred, verf, body):
     # rpc_msg (CALL)
     out = []
     out.append(be32(xid))
@@ -88,21 +78,20 @@ def rpc_call_msg(xid, prog, vers, proc, cred=None, verf=None, body=""):
 
 def rpc_parse_reply(buf):
     off = 0
-    xid, off        = be32u(buf, off)
-    mtype, off      = be32u(buf, off)
+    xid, off = be32u(buf, off)
+    mtype, off = be32u(buf, off)
     if mtype != RPC_REPLY:
-        raise ValueError("not a REPLY")
-    stat, off       = be32u(buf, off)  # MSG_ACCEPTED or DENIED
+        raise ValueError("not an RPC REPLY")
+    stat, off = be32u(buf, off)  # accepted/denied
     if stat != MSG_ACCEPTED:
         raise ValueError("RPC denied (stat=%d)" % stat)
     # verifier opaque_auth
-    flav, off       = be32u(buf, off)
-    vlen, off       = be32u(buf, off)
+    flav, off = be32u(buf, off)
+    vlen, off = be32u(buf, off)
     off += xdr_pad_len(vlen)
-    accept_stat, off= be32u(buf, off)
+    accept_stat, off = be32u(buf, off)
     if accept_stat != SUCCESS:
-        raise ValueError("RPC accepted but not SUCCESS (stat=%d)" % accept_stat)
-    # remaining is procedure result
+        raise ValueError("RPC accepted but non-success (stat=%d)" % accept_stat)
     return xid, buf[off:]
 
 def udp_call(host, port, payload, timeout=2.0, retries=3):
@@ -120,11 +109,47 @@ def udp_call(host, port, payload, timeout=2.0, retries=3):
     s.close()
     raise last_err
 
+def tcp_call(host, port, payload, timeout=3.0):
+    # RPC over TCP uses Record Marking: 4 bytes header:
+    # bit31=1 last fragment, bits0-30 = length
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    s.connect((host, port))
+    rm = struct.pack(">I", 0x80000000 | len(payload))
+    s.sendall(rm + payload)
+    # Read fragments until last-frag seen
+    chunks = []
+    total = 0
+    while True:
+        hdr = _recv_exact(s, 4)
+        if not hdr:
+            break
+        (frag,) = struct.unpack(">I", hdr)
+        last = (frag & 0x80000000) != 0
+        flen = frag & 0x7fffffff
+        data = _recv_exact(s, flen)
+        chunks.append(data)
+        total += len(data)
+        if last:
+            break
+    s.close()
+    return "".join(chunks)
+
+def _recv_exact(sock, n):
+    buf = []
+    r = 0
+    while r < n:
+        chunk = sock.recv(n - r)
+        if not chunk:
+            break
+        buf.append(chunk)
+        r += len(chunk)
+    return "".join(buf)
+
 def pmap_getport(host, prog, vers, proto=IPPROTO_UDP):
     xid = random.randint(1, 0x7fffffff)
-    # mapping: program, version, protocol, port
     body = be32(prog) + be32(vers) + be32(proto) + be32(0)
-    req  = rpc_call_msg(xid, PMAP_PROG, PMAP_VERS, PMAP_GETPORT, body=body)
+    req  = rpc_call_msg(xid, PMAP_PROG, PMAP_VERS, PMAP_GETPORT, xdr_auth_null(), xdr_auth_null(), body)
     resp = udp_call(host, 111, req)
     rxid, rest = rpc_parse_reply(resp)
     if rxid != xid: raise ValueError("XID mismatch")
@@ -132,175 +157,12 @@ def pmap_getport(host, prog, vers, proto=IPPROTO_UDP):
     return port
 
 def mnt_export_list(host, mnt_port):
-    """
-    MOUNTPROC_EXPORT (v3) returns a linked list:
-      exportlist -> [ dirpath(string), groups(list), next(ptr) ]
-    groups -> [ name(string), next(ptr) ]
-    Return: list of dirpath strings.
-    """
     xid  = random.randint(1, 0x7fffffff)
-    req  = rpc_call_msg(xid, MNT_PROG, MNT_VERS3, MNT_PROC_EXPORT, body="")
+    req  = rpc_call_msg(xid, MNT_PROG, MNT_VERS3, MNT_PROC_EXPORT, xdr_auth_null(), xdr_auth_null(), "")
     resp = udp_call(host, mnt_port, req)
     rxid, rest = rpc_parse_reply(resp)
     if rxid != xid: raise ValueError("XID mismatch")
     exports = []
     off = 0
-    # The list is encoded as: bool(has_entry) then entry; repeated. bool is 0/1 (uint32)
     while True:
-        if off + 4 > len(rest):
-            break
-        has, off = be32u(rest, off)
-        if has == 0:
-            break
-        # dirpath (string)
-        # string: len(4) + data + pad
-        if off + 4 > len(rest): break
-        slen, off = be32u(rest, off)
-        end = off + xdr_pad_len(slen)
-        dirpath = rest[off: off + slen]
-        off = end
-        exports.append(dirpath)
-        # groups list: skip it
-        # groups is a linked list: bool(has) -> name(string) -> next...
-        while True:
-            if off + 4 > len(rest): break
-            ghas, off = be32u(rest, off)
-            if ghas == 0:
-                break
-            # name
-            if off + 4 > len(rest): break
-            glen, off = be32u(rest, off)
-            off += xdr_pad_len(glen)
-        # next (handled by outer loop via 'has')
-    return exports
-
-def mnt_mnt(host, mnt_port, dirpath):
-    """
-    MOUNTPROC_MNT (v3)
-    Arg: dirpath (string)
-    Res: mountres3 {
-         fhs_status (u32)
-         if OK: fhandle3 { len(u32) data[] pad } and authflavors[]
-    }
-    Return (status, fh_bytes) where fh_bytes may be None on error.
-    """
-    xid  = random.randint(1, 0x7fffffff)
-    arg  = xdr_string(dirpath)
-    req  = rpc_call_msg(xid, MNT_PROG, MNT_VERS3, MNT_PROC_MNT, body=arg)
-    resp = udp_call(host, mnt_port, req)
-    rxid, rest = rpc_parse_reply(resp)
-    if rxid != xid: raise ValueError("XID mismatch")
-    off = 0
-    status, off = be32u(rest, off)
-    if status != MNT3_OK:
-        return status, None
-    # fhandle3
-    fh_len, off = be32u(rest, off)
-    pad = xdr_pad_len(fh_len) - fh_len
-    fh   = rest[off: off + fh_len]
-    off += fh_len + pad
-    # auth flavors array: length + entries (we don't need them)
-    if off + 4 <= len(rest):
-        n, off = be32u(rest, off)
-        off += 4 * n
-    return status, fh
-
-def nfs3_getattr(host, nfs_port, fh):
-    """
-    NFSv3 GETATTR
-    Arg: nfs_fh3 (len + opaque)
-    Res: status (u32); if OK:
-         post_op_attr = attributes_follow(bool)
-         fattr3:
-           type(4) mode(4) nlink(4) uid(4) gid(4)
-           size(8) used(8)
-           rdev: specdata3 { specdata1(u32) specdata2(u32) }
-           fsid(8) fileid(8)
-           atime(3*4) mtime(3*4) ctime(3*4)
-    Return: (status, fsid_uint64)  when OK; else (status, None)
-    """
-    xid = random.randint(1, 0x7fffffff)
-    arg = xdr_opaque(fh)
-    req = rpc_call_msg(xid, NFS_PROG, NFS_VERS3, NFS3_GETATTR, body=arg)
-    resp= udp_call(host, nfs_port, req)
-    rxid, rest = rpc_parse_reply(resp)
-    if rxid != xid: raise ValueError("XID mismatch")
-    off = 0
-    status, off = be32u(rest, off)
-    if status != NFS3_OK:
-        return status, None
-    # attributes_follow (bool)
-    attr_follow, off = be32u(rest, off)
-    if attr_follow == 0:
-        return status, None
-    # Skip fields up to fsid:
-    # 5 * u32
-    off += 4 * 5
-    # size(8) used(8) => two u32 each
-    off += 8  # size (2 * 4)
-    off += 8  # used (2 * 4)
-    # rdev: two u32
-    off += 8
-    # fsid: uint64 (two u32)
-    hi, off = be32u(rest, off)
-    lo, off = be32u(rest, off)
-    fsid = be64u_from_two32(hi, lo)
-    return status, fsid
-
-def main():
-    if len(sys.argv) != 2:
-        sys.stderr.write("Usage: %s <ip>\n" % sys.argv[0])
-        sys.exit(1)
-    host = sys.argv[1]
-
-    # 1) Discover ports
-    try:
-        mnt_port = pmap_getport(host, MNT_PROG, MNT_VERS3, IPPROTO_UDP)
-        nfs_port = pmap_getport(host, NFS_PROG, NFS_VERS3, IPPROTO_UDP)
-    except Exception as e:
-        sys.stderr.write("portmap/GETPORT failed: %s\n" % (e,))
-        sys.exit(2)
-    if mnt_port == 0:
-        sys.stderr.write("mountd v3 not available on %s\n" % host); sys.exit(3)
-    if nfs_port == 0:
-        sys.stderr.write("nfs v3 not available on %s\n" % host); sys.exit(4)
-
-    # 2) List exports
-    try:
-        exports = mnt_export_list(host, mnt_port)
-    except Exception as e:
-        sys.stderr.write("MOUNTPROC_EXPORT failed: %s\n" % (e,))
-        sys.exit(5)
-
-    if not exports:
-        sys.stderr.write("No exports returned by server.\n")
-        sys.exit(6)
-
-    # 3) For each export, MNT then GETATTR to read fsid
-    for dp in exports:
-        dp_print = dp
-        try:
-            status, fh = mnt_mnt(host, mnt_port, dp)
-            if status != MNT3_OK or fh is None:
-                print("%s\tstatus=%d (mount failed)" % (dp_print, status))
-                continue
-            st, fsid = nfs3_getattr(host, nfs_port, fh)
-            if st == NFS3_OK and fsid is not None:
-                # print fsid as hex/decimal
-                print("%s\tfsid=0x%x (%d)" % (dp_print, fsid, fsid))
-            else:
-                print("%s\tgetattr status=%d (no fsid)" % (dp_print, st))
-        except socket.timeout:
-            print("%s\t(timeout)" % dp_print)
-        except Exception as e:
-            print("%s\t(error: %s)" % (dp_print, e))
-
-if __name__ == "__main__":
-    # seed XIDs differently each run
-    random.seed(int(time.time()) ^ (os.getpid() if 'os' in globals() else 0))
-    # Avoid importing os earlier to keep dependencies minimal in old pythons
-    try:
-        import os
-    except:
-        pass
-    main()
+        if off + 4 > le
