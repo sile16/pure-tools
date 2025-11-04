@@ -165,4 +165,123 @@ def mnt_export_list(host, mnt_port):
     exports = []
     off = 0
     while True:
-        if off + 4 > le
+        if off + 4 > len(rest): break
+        has, off = be32u(rest, off)
+        if has == 0: break
+        slen, off = be32u(rest, off)
+        end = off + xdr_pad_len(slen)
+        dirpath = rest[off: off + slen]
+        off = end
+        exports.append(dirpath)
+        # skip groups list
+        while True:
+            if off + 4 > len(rest): break
+            ghas, off = be32u(rest, off)
+            if ghas == 0: break
+            glen, off = be32u(rest, off)
+            off += xdr_pad_len(glen)
+    return exports
+
+def mnt_mnt(host, mnt_port, dirpath):
+    xid  = random.randint(1, 0x7fffffff)
+    arg  = xdr_string(dirpath)
+    req  = rpc_call_msg(xid, MNT_PROG, MNT_VERS3, MNT_PROC_MNT, xdr_auth_null(), xdr_auth_null(), arg)
+    resp = udp_call(host, mnt_port, req)
+    rxid, rest = rpc_parse_reply(resp)
+    if rxid != xid: raise ValueError("XID mismatch")
+    off = 0
+    status, off = be32u(rest, off)
+    if status != MNT3_OK:
+        return status, None
+    fh_len, off = be32u(rest, off)
+    pad = xdr_pad_len(fh_len) - fh_len
+    fh   = rest[off: off + fh_len]
+    off += fh_len + pad
+    # skip auth flavors
+    if off + 4 <= len(rest):
+        n, off = be32u(rest, off)
+        off += 4 * n
+    return status, fh
+
+def nfs3_getattr_tcp_authsys(host, nfs_port, fh, uid, gid, hostname):
+    xid = random.randint(1, 0x7fffffff)
+    cred = xdr_auth_sys(uid, gid, hostname, [])
+    verf = xdr_auth_null()
+    arg  = xdr_bytes(fh)  # nfs_fh3 = opaque<> (len + bytes + pad)
+    req  = rpc_call_msg(xid, NFS_PROG, NFS_VERS3, NFS3_GETATTR, cred, verf, arg)
+    resp = tcp_call(host, nfs_port, req)
+    rxid, rest = rpc_parse_reply(resp)
+    if rxid != xid: raise ValueError("XID mismatch in NFS reply")
+    off = 0
+    status, off = be32u(rest, off)
+    if status != NFS3_OK:
+        return status, None
+    # GETATTR3resok -> fattr3 directly (no boolean here)
+    # fattr3 layout (RFC 1813):
+    # type, mode, nlink, uid, gid (5 * u32)
+    off += 4 * 5
+    # size(8) used(8)
+    off += 8
+    off += 8
+    # rdev specdata1/specdata2 (2 * u32)
+    off += 8
+    # fsid (uint64 as two u32)
+    hi, off = be32u(rest, off)
+    lo, off = be32u(rest, off)
+    fsid = (hi << 32) | lo
+    return status, fsid
+
+def main():
+    if len(sys.argv) < 2:
+        sys.stderr.write("Usage: %s <ip> [uid gid hostname]\n" % sys.argv[0]); sys.exit(1)
+    host = sys.argv[1]
+    uid = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    gid = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    hostname = sys.argv[4] if len(sys.argv) > 4 else "client"
+
+    random.seed(int(time.time()) & 0x7fffffff)
+
+    # Discover ports
+    try:
+        mnt_port = pmap_getport(host, MNT_PROG, MNT_VERS3, IPPROTO_UDP)
+        nfs_port_udp = pmap_getport(host, NFS_PROG, NFS_VERS3, IPPROTO_UDP)
+        nfs_port_tcp = pmap_getport(host, NFS_PROG, NFS_VERS3, 6)  # TCP protocol number
+    except Exception as e:
+        sys.stderr.write("portmap GETPORT failed: %s\n" % (e,)); sys.exit(2)
+
+    if mnt_port == 0:
+        sys.stderr.write("mountd v3 not available on %s\n" % host); sys.exit(3)
+    if nfs_port_tcp == 0 and nfs_port_udp == 0:
+        sys.stderr.write("nfs v3 not available on %s\n" % host); sys.exit(4)
+
+    # List exports
+    try:
+        exports = mnt_export_list(host, mnt_port)
+    except Exception as e:
+        sys.stderr.write("EXPORTS failed: %s\n" % (e,)); sys.exit(5)
+
+    if not exports:
+        sys.stderr.write("No exports returned by server.\n"); sys.exit(6)
+
+    # Prefer TCP for NFS calls
+    nfs_port = nfs_port_tcp if nfs_port_tcp != 0 else nfs_port_udp
+
+    # For each export: mount -> getattr over TCP/AUTH_SYS
+    for dp in exports:
+        path = dp
+        try:
+            st, fh = mnt_mnt(host, mnt_port, path)
+            if st != MNT3_OK or fh is None:
+                print("%s\tmount status=%d" % (path, st)); continue
+            st2, fsid = nfs3_getattr_tcp_authsys(host, nfs_port, fh, uid, gid, hostname)
+            if st2 == NFS3_OK and fsid is not None:
+                print("%s\tfsid=0x%x (%d)" % (path, fsid, fsid))
+            else:
+                print("%s\tgetattr status=%d (no fsid)" % (path, st2))
+        except socket.timeout:
+            print("%s\t(timeout)" % path)
+        except Exception as e:
+            print("%s\t(error: %s)" % (path, e))
+
+if __name__ == "__main__":
+    main()
